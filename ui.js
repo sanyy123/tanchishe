@@ -81,6 +81,22 @@ if (!catModeEnabled) { catActive = false; cat = null; catTrail = []; }
 });
 updateCatModeBtn();
 
+// ===== 障碍模式按钮 =====
+function updateObsModeBtn() {
+if (obstacleModeEnabled) { obsModeBtn.textContent = '🚧 障碍: 开'; obsModeBtn.classList.remove('obs-off'); obsModeBtn.classList.add('obs-on'); }
+else { obsModeBtn.textContent = '🚧 障碍: 关'; obsModeBtn.classList.remove('obs-on'); obsModeBtn.classList.add('obs-off'); }
+}
+obsModeBtn.addEventListener('click', () => {
+obstacleModeEnabled = !obstacleModeEnabled;
+localStorage.setItem('snakeObstacleMode', obstacleModeEnabled ? '1' : '0');
+updateObsModeBtn();
+if (!obstacleModeEnabled) {
+obstacles = [];
+portals = [];
+}
+});
+updateObsModeBtn();
+
 // ===== 手机端作弊：连点标题 5 次 =====
 let titleTapCount = 0;
 let titleTapTimer = null;
