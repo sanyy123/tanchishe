@@ -34,17 +34,22 @@
 <h2 id="overlayTitle">十二生肖闯江湖</h2>
 <p id="overlayMsg">准备好踏入江湖了吗？</p>
 <button id="startBtn">开始修炼</button>
+<div class="mode-select" id="modeSelect">
+<button class="mode-btn active" id="modeSingle" data-mode="single">👤 单人模式</button>
+<button class="mode-btn" id="modeDouble" data-mode="double">👥 双人模式</button>
+</div>
 </div>
 <div class="pause-hint">空格 · 暂停</div>
 </div>
 </div>
 </div>
 <div class="ui">
-<div class="stat"><span class="label">积分</span><span class="value" id="score">0</span></div>
+<div class="stat"><span class="label" id="scoreLabel">积分</span><span class="value" id="score">0</span></div>
+<div class="stat p2-stat" id="score2Stat" style="display:none;"><span class="label">P2 积分</span><span class="value" id="score2">0</span></div>
 <div class="stat high"><span class="label">最高</span><span class="value" id="highScore">0</span></div>
 <div class="stat"><span class="label">体长</span><span class="value" id="length">3</span></div>
 </div>
-<div class="controls">方向：<kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 或 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> &nbsp;·&nbsp; <kbd>空格</kbd> 暂停</div>
+<div class="controls">方向：<kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 或 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> &nbsp;·&nbsp; <kbd>空格</kbd> 暂停 &nbsp;·&nbsp; 双人：P1 = <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>，P2 = <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></div>
 <p class="music-hint">全程常驻BGM · 菜单缓和 / 游戏随分数升燃 · 音乐来自 soundimage.org（Eric Matyas）</p>
 <div class="mobile-controls">
 <div class="dpad">
