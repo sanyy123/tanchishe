@@ -19,6 +19,7 @@ const skinBtn = document.getElementById('skinBtn');
 const skinModal = document.getElementById('skinModal');
 const skinListEl = document.getElementById('skinList');
 const catModeBtn = document.getElementById('catModeBtn');
+const obsModeBtn = document.getElementById('obsModeBtn');
 const guideBtn = document.getElementById('guideBtn');
 const guideModal = document.getElementById('guideModal');
 const guideNavEl = document.getElementById('guideNav');
@@ -49,6 +50,19 @@ const CAT_ACTIVATE_SCORE = 250;
 let catTrail = [], catBiteLosses = 0;
 const CAT_BITE_LOSS_LIMIT = 20;
 let catModeEnabled = localStorage.getItem('snakeCatMode') !== '0';
+
+// ===== 障碍与传送门 =====
+let obstacles = [];
+let portals = [];
+let portalPairCounter = 0;
+let obstacleModeEnabled = localStorage.getItem('snakeObstacleMode') !== '0';
+const OBSTACLE_SCORE = 150;
+const OBSTACLE_MAX = 25;
+const PORTAL_SCORE = 400;
+const PORTAL_MAX_PAIRS = 2;
+const PORTAL_DURATION = 15000;
+const PORTAL_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a06cd5'];
+
 let currentSkinId = localStorage.getItem('snakeCurrentSkin') || 'default';
 if (!SKINS[currentSkinId]) currentSkinId = 'default';
 
@@ -132,16 +146,20 @@ accumulator = 0; survivalAccumulator = 0;
 cat = null; catActive = false; catTrail = []; catBiteLosses = 0;
 speedFactor = 1; buffSpeedTimer = 0; shieldActive = false;
 specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 0;
+obstacles = []; portals = []; portalPairCounter = 0;
 scoreEl.textContent = '0'; lengthEl.textContent = '3';
 placeFood(); overlay.classList.add('hidden');
 updateGameBgm(); renderAchievements();
 }
 function placeFood() {
-let valid = false;
-while (!valid) {
+let valid = false, attempts = 0;
+while (!valid && attempts < 500) {
+attempts++;
 food = { x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS) };
 valid = !snake.some(s => s.x === food.x && s.y === food.y);
 if (valid && specialFood) valid = !(specialFood.x === food.x && specialFood.y === food.y);
+if (valid && obstacles.some(o => o.x === food.x && o.y === food.y)) valid = false;
+if (valid && portals.some(p => p.x === food.x && p.y === food.y)) valid = false;
 }
 }
 function spawnSpecialFood() {
@@ -158,9 +176,69 @@ else if (r < 0.75) sf.type = 'shield';
 else sf.type = 'shrink';
 valid = !snake.some(s => s.x === sf.x && s.y === sf.y);
 if (valid && food) valid = !(food.x === sf.x && food.y === sf.y);
+if (valid && obstacles.some(o => o.x === sf.x && o.y === sf.y)) valid = false;
+if (valid && portals.some(p => p.x === sf.x && p.y === sf.y)) valid = false;
 }
 if (valid) { specialFood = sf; specialFoodTimer = SPECIAL_FOOD_DURATION; }
 }
+
+// ===== 石头生成 =====
+function trySpawnObstacle() {
+if (!obstacleModeEnabled) return;
+if (score < OBSTACLE_SCORE) return;
+if (obstacles.length >= OBSTACLE_MAX) return;
+if (foodsEaten % 3 !== 0) return;
+let attempts = 0;
+while (attempts < 100) {
+attempts++;
+const x = Math.floor(Math.random()*COLS);
+const y = Math.floor(Math.random()*ROWS);
+if (Math.abs(x - snake[0].x) + Math.abs(y - snake[0].y) < 5) continue;
+if (snake.some(s => s.x === x && s.y === y)) continue;
+if (food.x === x && food.y === y) continue;
+if (specialFood && specialFood.x === x && specialFood.y === y) continue;
+if (obstacles.some(o => o.x === x && o.y === y)) continue;
+if (portals.some(p => p.x === x && p.y === y)) continue;
+if (cat && cat.x === x && cat.y === y) continue;
+obstacles.push({ x, y });
+showCheatToast('🪨 石头出现！小心别撞到！');
+break;
+}
+}
+
+// ===== 传送门生成 =====
+function trySpawnPortal() {
+if (!obstacleModeEnabled) return;
+if (score < PORTAL_SCORE) return;
+if (portals.length >= PORTAL_MAX_PAIRS * 2) return;
+if (foodsEaten % 15 !== 0) return;
+if (Math.random() > 0.3) return;
+const positions = [];
+let attempts = 0;
+while (positions.length < 2 && attempts < 300) {
+attempts++;
+const x = Math.floor(Math.random()*COLS);
+const y = Math.floor(Math.random()*ROWS);
+if (Math.abs(x - snake[0].x) + Math.abs(y - snake[0].y) < 4) continue;
+if (snake.some(s => s.x === x && s.y === y)) continue;
+if (food.x === x && food.y === y) continue;
+if (specialFood && specialFood.x === x && specialFood.y === y) continue;
+if (obstacles.some(o => o.x === x && o.y === y)) continue;
+if (portals.some(p => p.x === x && p.y === y)) continue;
+if (cat && cat.x === x && cat.y === y) continue;
+if (positions.some(p => Math.abs(p.x - x) + Math.abs(p.y - y) < 8)) continue;
+positions.push({ x, y });
+}
+if (positions.length < 2) return;
+portalPairCounter++;
+const color = PORTAL_COLORS[(portalPairCounter - 1) % PORTAL_COLORS.length];
+const pairId = portalPairCounter;
+positions.forEach(pos => {
+portals.push({ x: pos.x, y: pos.y, pairId: pairId, color: color, timer: PORTAL_DURATION });
+});
+showCheatToast('🌀 传送门出现！');
+}
+
 function spawnParticles(x, y, color) { for (let i=0;i<14;i++) { const angle=(Math.PI*2*i)/14+Math.random()*0.5; const spd=1.8+Math.random()*2.8; particles.push({x:x*GRID+GRID/2,y:y*GRID+GRID/2,vx:Math.cos(angle)*spd,vy:Math.sin(angle)*spd,life:1,decay:0.022+Math.random()*0.02,size:2.5+Math.random()*3.5,color}); } }
 function updateParticles() { for (let i=particles.length-1;i>=0;i--) { const p=particles[i]; p.x+=p.vx; p.y+=p.vy; p.vx*=0.95; p.vy*=0.95; p.life-=p.decay; if (p.life<=0) particles.splice(i,1); } }
 
@@ -173,7 +251,9 @@ catY = Math.floor(Math.random()*ROWS);
 const tooCloseToSnake = snake.some(s => Math.abs(s.x-catX)+Math.abs(s.y-catY) < 5);
 const tooCloseToFood = Math.abs(food.x-catX)+Math.abs(food.y-catY) < 3;
 const tooCloseToSpecial = specialFood && (Math.abs(specialFood.x-catX)+Math.abs(specialFood.y-catY) < 3);
-if (!tooCloseToSnake && !tooCloseToFood && !tooCloseToSpecial) valid = true;
+const onObstacle = obstacles.some(o => o.x === catX && o.y === catY);
+const onPortal = portals.some(p => p.x === catX && p.y === catY);
+if (!tooCloseToSnake && !tooCloseToFood && !tooCloseToSpecial && !onObstacle && !onPortal) valid = true;
 }
 cat = { x:catX, y:catY, dir:{x:0,y:0}, moveTimer:0 };
 catActive = true; catBiteLosses = 0;
@@ -195,7 +275,9 @@ if (Math.abs(dx) >= Math.abs(dy)) moveX = dx>0?1:(dx<0?-1:0);
 else moveY = dy>0?1:(dy<0?-1:0);
 const newX = cat.x+moveX, newY = cat.y+moveY;
 if (newX>=0 && newX<COLS && newY>=0 && newY<ROWS) {
-if (!snake.some(s => s.x===newX && s.y===newY)) { cat.x=newX; cat.y=newY; cat.dir={x:moveX,y:moveY}; }
+if (!snake.some(s => s.x===newX && s.y===newY) && !obstacles.some(o => o.x===newX && o.y===newY)) {
+cat.x=newX; cat.y=newY; cat.dir={x:moveX,y:moveY};
+}
 }
 catTrail.push({x:cat.x,y:cat.y});
 if (catTrail.length > 6) catTrail.shift();
@@ -236,6 +318,7 @@ if (nx<0 || nx>=COLS || ny<0 || ny>=ROWS) continue;
 const key = nx+','+ny;
 if (visited.has(key)) continue;
 if (snake.some(s => s.x===nx && s.y===ny)) continue;
+if (obstacles.some(o => o.x===nx && o.y===ny)) continue;
 visited.add(key); queue.push({x:nx,y:ny});
 }
 }
@@ -291,6 +374,62 @@ ctx.strokeStyle = skin.gridColor; ctx.lineWidth = 1.2;
 for (let i=0; i<=COLS; i++) { ctx.beginPath(); ctx.moveTo(i*GRID,0); ctx.lineTo(i*GRID,LOGICAL_SIZE); ctx.stroke(); }
 for (let i=0; i<=ROWS; i++) { ctx.beginPath(); ctx.moveTo(0,i*GRID); ctx.lineTo(LOGICAL_SIZE,i*GRID); ctx.stroke(); }
 }
+
+// ===== 绘制石头 =====
+obstacles.forEach(o => {
+const bx = o.x * GRID + GRID/2;
+const by = o.y * GRID + GRID/2;
+ctx.fillStyle = 'rgba(0,0,0,0.4)';
+ctx.beginPath(); ctx.ellipse(bx, by + GRID*0.38, GRID*0.42, GRID*0.15, 0, 0, Math.PI*2); ctx.fill();
+const stoneGrad = ctx.createRadialGradient(bx - GRID*0.2, by - GRID*0.25, 2, bx, by, GRID*0.6);
+stoneGrad.addColorStop(0, '#9a9aa6');
+stoneGrad.addColorStop(0.55, '#5a5a66');
+stoneGrad.addColorStop(1, '#33333d');
+ctx.fillStyle = stoneGrad;
+const pts = [[-0.45,-0.15],[-0.30,-0.42],[0.05,-0.45],[0.35,-0.30],[0.45,0.05],[0.30,0.40],[-0.05,0.45],[-0.35,0.30],[-0.45,0.10]];
+ctx.beginPath();
+pts.forEach((p, i) => { if (i===0) ctx.moveTo(bx+p[0]*GRID, by+p[1]*GRID); else ctx.lineTo(bx+p[0]*GRID, by+p[1]*GRID); });
+ctx.closePath();
+ctx.fill();
+ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+ctx.lineWidth = 1;
+ctx.stroke();
+ctx.fillStyle = 'rgba(255,255,255,0.28)';
+ctx.beginPath(); ctx.arc(bx - GRID*0.15, by - GRID*0.18, GRID*0.1, 0, Math.PI*2); ctx.fill();
+});
+
+// ===== 绘制传送门 =====
+const nowSec = performance.now() / 1000;
+portals.forEach(p => {
+const px = p.x * GRID + GRID/2;
+const py = p.y * GRID + GRID/2;
+const rotation = nowSec * 2;
+const pulse = 0.9 + Math.sin(nowSec * 4) * 0.1;
+const glow = ctx.createRadialGradient(px, py, GRID*0.1, px, py, GRID*0.95);
+glow.addColorStop(0, p.color + 'ff');
+glow.addColorStop(0.5, p.color + '88');
+glow.addColorStop(1, p.color + '00');
+ctx.fillStyle = glow;
+ctx.beginPath(); ctx.arc(px, py, GRID*0.95, 0, Math.PI*2); ctx.fill();
+ctx.save();
+ctx.translate(px, py);
+ctx.rotate(rotation);
+ctx.strokeStyle = p.color;
+ctx.lineWidth = 2.5;
+ctx.beginPath(); ctx.arc(0, 0, GRID*0.42 * pulse, 0, Math.PI * 1.5); ctx.stroke();
+ctx.rotate(-rotation * 1.7);
+ctx.beginPath(); ctx.arc(0, 0, GRID*0.28 * pulse, 0, Math.PI * 1.2); ctx.stroke();
+ctx.restore();
+ctx.fillStyle = '#ffffff';
+ctx.beginPath(); ctx.arc(px, py, GRID*0.1, 0, Math.PI*2); ctx.fill();
+const timerRatio = Math.max(0, p.timer / PORTAL_DURATION);
+ctx.beginPath();
+ctx.arc(px, py, GRID*0.62, -Math.PI/2, -Math.PI/2 + Math.PI*2*timerRatio);
+ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+ctx.lineWidth = 1.5;
+ctx.stroke();
+});
+
 foodPulse += 0.09;
 const pulse = 0.82 + Math.sin(foodPulse)*0.18;
 const fx = food.x*GRID + GRID/2, fy = food.y*GRID + GRID/2, fc = skin.foodColors;
@@ -532,17 +671,59 @@ survivalAccumulator += speed;
 while (survivalAccumulator >= 1000) { survivalAccumulator -= 1000; survivalTime++; }
 if (specialFood) { specialFoodTimer -= speed; if (specialFoodTimer <= 0) { specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 2000; } }
 if (specialFoodCooldown > 0) { specialFoodCooldown -= speed; if (specialFoodCooldown < 0) specialFoodCooldown = 0; }
+
+// 传送门计时
+if (portals.length > 0) {
+const pairsToRemove = new Set();
+portals.forEach(p => { p.timer -= speed; if (p.timer <= 0) pairsToRemove.add(p.pairId); });
+if (pairsToRemove.size > 0) {
+portals = portals.filter(p => !pairsToRemove.has(p.pairId));
+}
+}
+
 if (!catActive && catModeEnabled && score >= CAT_ACTIVATE_SCORE) spawnCat();
 direction = { ...nextDirection };
 const head = { x: snake[0].x + direction.x, y: snake[0].y + direction.y };
+
+// 撞墙
 if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
 if (shieldActive) { shieldActive=false; showCheatToast('🛡️ 护盾抵挡了墙壁！'); return; }
 else { gameOver('撞墙了'); return; }
 }
+
+// 传送门检测
+const enteredPortal = portals.find(p => p.x === head.x && p.y === head.y);
+if (enteredPortal) {
+const pair = portals.find(p => p.pairId === enteredPortal.pairId && (p.x !== enteredPortal.x || p.y !== enteredPortal.y));
+if (pair) {
+head.x = pair.x;
+head.y = pair.y;
+vibrate([60, 30, 60]);
+shakeAmount = 15;
+spawnParticles(enteredPortal.x, enteredPortal.y, enteredPortal.color);
+spawnParticles(pair.x, pair.y, pair.color);
+showCheatToast('🌀 传送门穿越！');
+}
+}
+
+// 撞石头
+if (obstacles.some(o => o.x === head.x && o.y === head.y)) {
+if (shieldActive) {
+shieldActive = false;
+obstacles = obstacles.filter(o => !(o.x === head.x && o.y === head.y));
+showCheatToast('🛡️ 护盾撞碎了石头！');
+return;
+} else {
+gameOver('撞到石头了'); return;
+}
+}
+
+// 自咬
 if (snake.some(s => s.x === head.x && s.y === head.y)) {
 if (shieldActive) { shieldActive=false; showCheatToast('🛡️ 护盾抵挡了自咬！'); return; }
 else { gameOver('咬到自己了'); return; }
 }
+
 snake.unshift(head);
 let ateSomething = false;
 if (head.x === food.x && head.y === food.y) {
@@ -562,6 +743,8 @@ spawnParticles(food.x, food.y, '#ff6b6b'); spawnParticles(food.x, food.y, '#00f5
 if (score > highScore) { highScore = score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
 placeFood();
 if (!specialFood && Math.random() < 0.35) spawnSpecialFood();
+trySpawnObstacle();
+trySpawnPortal();
 checkAchievements(); updateGameBgm();
 const newSpeed = calcSpeed();
 if (newSpeed !== speed) { speed = newSpeed; accumulator = 0; }
