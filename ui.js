@@ -11,6 +11,8 @@ achieveListEl.appendChild(item);
 achieveCountEl.textContent = unlockedCount + '/' + ACHIEVEMENTS.length;
 }
 function checkAchievements() {
+// 双人模式不检查成就（分数、体长等来自 P1，会误判）
+if (gameMode === 'double') { renderAchievements(); return; }
 let newly = [];
 ACHIEVEMENTS.forEach(a => { if (!unlocked.includes(a.id) && a.check()) { unlocked.push(a.id); newly.push(a); } });
 if (newly.length) { saveAchievements(); renderAchievements(); newly.forEach((a,i)=>setTimeout(()=>showAchieveToast(a), i*1800)); } else renderAchievements();
@@ -45,7 +47,18 @@ const unlockedSkin = isSkinUnlocked(skin);
 const card = document.createElement('div');
 card.className = 'skin-card' + (currentSkinId === skin.id ? ' active' : '') + (!unlockedSkin ? ' locked' : '');
 card.innerHTML = '<div class="skin-emoji">'+skin.emoji+'</div><div class="skin-name">'+skin.name+'</div>'+( !unlockedSkin ? '<div class="skin-lock">🔒 未解锁</div>' : (currentSkinId === skin.id ? '<div class="skin-lock" style="color:#00f5d4">使用中</div>' : '') );
-if (unlockedSkin) card.addEventListener('click', () => { currentSkinId = skin.id; localStorage.setItem('snakeCurrentSkin', currentSkinId); renderSkins(); draw(); });
+if (unlockedSkin) card.addEventListener('click', () => {
+currentSkinId = skin.id;
+localStorage.setItem('snakeCurrentSkin', currentSkinId);
+renderSkins();
+// 如果游戏正在进行且是单人模式，立即刷新当前蛇的皮肤数据
+if (!isGameOver && snakes[0]) {
+const skinObj = SKINS[currentSkinId] || SKINS.default;
+snakes[0].headColors = skinObj.headColors || ['#5efce8','#00f5d4','#00bbf9'];
+snakes[0].bodyHue = skinObj.bodyHue || {r:0,g:235,b:220};
+}
+draw();
+});
 skinListEl.appendChild(card);
 });
 }
@@ -69,17 +82,27 @@ guideContentEl.innerHTML = g.content;
 
 // ===== 猫模式按钮 =====
 function updateCatModeBtn() {
+if (gameMode === 'double') {
+catModeEnabled = false;
+localStorage.setItem('snakeCatMode', '0');
+catModeBtn.textContent = '🐱 猫咪: 关(双人)';
+catModeBtn.classList.remove('cat-on');
+catModeBtn.classList.add('cat-off');
+catModeBtn.disabled = true;
+return;
+}
+catModeBtn.disabled = false;
 if (catModeEnabled) { catModeBtn.textContent = '🐱 猫咪: 开'; catModeBtn.classList.remove('cat-off'); catModeBtn.classList.add('cat-on'); }
 else { catModeBtn.textContent = '🐱 猫咪: 关'; catModeBtn.classList.remove('cat-on'); catModeBtn.classList.add('cat-off'); }
 }
 catModeBtn.addEventListener('click', () => {
+if (gameMode === 'double') return;
 catModeEnabled = !catModeEnabled;
 localStorage.setItem('snakeCatMode', catModeEnabled ? '1' : '0');
 updateCatModeBtn();
 if (catModeEnabled && score >= CAT_ACTIVATE_SCORE && !catActive && !isGameOver) { spawnCat(); }
 if (!catModeEnabled) { catActive = false; cat = null; catTrail = []; }
 });
-updateCatModeBtn();
 
 // ===== 障碍模式按钮 =====
 function updateObsModeBtn() {
@@ -90,11 +113,36 @@ obsModeBtn.addEventListener('click', () => {
 obstacleModeEnabled = !obstacleModeEnabled;
 localStorage.setItem('snakeObstacleMode', obstacleModeEnabled ? '1' : '0');
 updateObsModeBtn();
-if (!obstacleModeEnabled) {
-obstacles = [];
-portals = [];
-}
+if (!obstacleModeEnabled) { obstacles = []; portals = []; }
 });
+
+// ===== 模式选择按钮 =====
+const modeSingleBtn = document.getElementById('modeSingle');
+const modeDoubleBtn = document.getElementById('modeDouble');
+function updateModeButtons() {
+modeSingleBtn.classList.toggle('active', gameMode === 'single');
+modeDoubleBtn.classList.toggle('active', gameMode === 'double');
+}
+modeSingleBtn.addEventListener('click', () => {
+if (gameMode === 'single') return;
+gameMode = 'single';
+updateModeButtons();
+updateCatModeBtn();
+overlayTitle.textContent = '十二生肖闯江湖';
+overlayMsg.textContent = '单人模式 · 准备好踏入江湖了吗？';
+startBtn.textContent = '开始修炼';
+});
+modeDoubleBtn.addEventListener('click', () => {
+if (gameMode === 'double') return;
+gameMode = 'double';
+updateModeButtons();
+updateCatModeBtn();
+overlayTitle.textContent = '👥 双人对战';
+overlayMsg.textContent = 'P1 = WASD  ·  P2 = 方向键  ·  先到 300 分或对方先死获胜';
+startBtn.textContent = '开始对战';
+});
+updateModeButtons();
+updateCatModeBtn();
 updateObsModeBtn();
 
 // ===== 手机端作弊：连点标题 5 次 =====
@@ -107,16 +155,30 @@ if (titleTapCount >= 5) { titleTapCount = 0; cheatUnlockAll(); return; }
 titleTapTimer = setTimeout(() => { titleTapCount = 0; }, 2000);
 });
 
-// ===== 电脑端作弊：数字键 520 / 1314 =====
+// ===== 键盘 =====
+// P1: W A S D    P2: ↑ ↓ ← →
 let cheatBuffer = '';
 document.addEventListener('keydown', (e) => {
 const key = e.key.toLowerCase();
 if (['arrowup','arrowdown','arrowleft','arrowright',' ','w','a','s','d'].includes(key)) e.preventDefault();
+
 if (key === ' ') { togglePause(); return; }
-if (key === 'arrowup' || key === 'w') setDirection('up');
-else if (key === 'arrowdown' || key === 's') setDirection('down');
-else if (key === 'arrowleft' || key === 'a') setDirection('left');
-else if (key === 'arrowright' || key === 'd') setDirection('right');
+
+// P1 控制（WASD）
+if (key === 'w') setDirection(0, 'up');
+else if (key === 's') setDirection(0, 'down');
+else if (key === 'a') setDirection(0, 'left');
+else if (key === 'd') setDirection(0, 'right');
+
+// P2 控制（方向键）- 仅双人模式
+if (gameMode === 'double') {
+if (key === 'arrowup') setDirection(1, 'up');
+else if (key === 'arrowdown') setDirection(1, 'down');
+else if (key === 'arrowleft') setDirection(1, 'left');
+else if (key === 'arrowright') setDirection(1, 'right');
+}
+
+// 作弊码
 if (e.key >= '0' && e.key <= '9') {
 cheatBuffer += e.key;
 if (cheatBuffer.length > 6) cheatBuffer = cheatBuffer.slice(-6);
@@ -127,20 +189,20 @@ else if (cheatBuffer.endsWith('1314')) { cheatUnlockAll(); cheatBuffer=''; }
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('gesturestart', e => e.preventDefault());
 
-// ===== 方向键 =====
+// ===== 方向键（手机端单人用） =====
 const dpadButtons = document.querySelectorAll('.dpad button[data-dir]');
 if (window.PointerEvent) {
 dpadButtons.forEach(btn => {
-btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); btn.classList.add('pressed'); setDirection(btn.dataset.dir); });
+btn.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); btn.classList.add('pressed'); setDirection(0, btn.dataset.dir); });
 btn.addEventListener('pointerup', () => btn.classList.remove('pressed'));
 btn.addEventListener('pointercancel', () => btn.classList.remove('pressed'));
 });
 } else {
 dpadButtons.forEach(btn => {
-btn.addEventListener('touchstart', e => { e.preventDefault(); btn.classList.add('pressed'); setDirection(btn.dataset.dir); }, { passive: false });
+btn.addEventListener('touchstart', e => { e.preventDefault(); btn.classList.add('pressed'); setDirection(0, btn.dataset.dir); }, { passive: false });
 btn.addEventListener('touchend', () => btn.classList.remove('pressed'));
 btn.addEventListener('touchcancel', () => btn.classList.remove('pressed'));
-btn.addEventListener('mousedown', e => { e.preventDefault(); setDirection(btn.dataset.dir); });
+btn.addEventListener('mousedown', e => { e.preventDefault(); setDirection(0, btn.dataset.dir); });
 });
 }
 document.getElementById('mobilePause').addEventListener('click', togglePause);
@@ -195,6 +257,8 @@ document.getElementById('overlayTitle').textContent = '十二生肖闯江湖';
 document.getElementById('overlayMsg').textContent = '准备好踏入江湖了吗？';
 document.getElementById('startBtn').textContent = '开始修炼';
 document.getElementById('startBtn').style.display = 'block';
+updateModeButtons();
+updateCatModeBtn();
 }, 300);
 }
 ASSET_KEYS.forEach(key => {
