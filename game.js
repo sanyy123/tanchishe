@@ -26,6 +26,15 @@ const guideBtn = document.getElementById('guideBtn');
 const guideModal = document.getElementById('guideModal');
 const guideNavEl = document.getElementById('guideNav');
 const guideContentEl = document.getElementById('guideContent');
+const dualSkinModal = document.getElementById('dualSkinModal');
+const dualSkinTitle = document.getElementById('dualSkinTitle');
+const dualPageBoard = document.getElementById('dualPageBoard');
+const dualPageSnake = document.getElementById('dualPageSnake');
+const dualBoardGrid = document.getElementById('dualBoardGrid');
+const dualP1Grid = document.getElementById('dualP1Grid');
+const dualP2Grid = document.getElementById('dualP2Grid');
+const dualNextBtn = document.getElementById('dualNextBtn');
+const closeDualSkinBtn = document.getElementById('closeDualSkin');
 
 const LOGICAL_SIZE = 600, GRID = 20, COLS = 30, ROWS = 30;
 const dpr = window.devicePixelRatio || 1;
@@ -38,7 +47,6 @@ let gameMode = 'single';
 let snakes = [];
 let food = { x: 0, y: 0 };
 let score = 0, highScore = 0;
-// ===== 成就系统兼容变量 =====
 let maxLengthReached = 3;
 let foodsEaten = 0;
 let survivalTime = 0;
@@ -69,10 +77,20 @@ const PORTAL_SCORE = 400, PORTAL_MAX_PAIRS = 2;
 const PORTAL_DURATION = 15000;
 const PORTAL_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a06cd5'];
 const WIN_SCORE = 300;
-let currentSkinId = localStorage.getItem('snakeCurrentSkin') || 'default';
-if (!SKINS[currentSkinId]) currentSkinId = 'default';
 
-// 循环内临时引用
+// ★ 棋盘皮肤（全局）+ 双人选择缓存
+let boardSkinId = localStorage.getItem('snakeBoardSkin') || localStorage.getItem('snakeCurrentSkin') || 'default';
+if (!SKINS[boardSkinId]) boardSkinId = 'default';
+let currentSkinId = boardSkinId; // 兼容旧代码
+// 双人选择：P1、P2 各自的蛇皮肤
+let p1SkinId = 'default';
+let p2SkinId = 'default';
+// 弹窗缓存
+let dualSelectedBoardId = boardSkinId;
+let dualSelectedP1 = 'default';
+let dualSelectedP2 = 'default';
+let dualPage = 'board'; // 'board' | 'snake'
+
 let snake = null, direction = {x:1,y:0}, nextDirection = {x:1,y:0};
 let currentPlayer = null;
 
@@ -85,7 +103,6 @@ const SNAKE_ASSETS = { head: new Image(), tail: new Image(), food: new Image(), 
 const HORSE_ASSETS = { head: new Image(), tail: new Image(), food: new Image(), decor: new Image() };
 const SHEEP_ASSETS = { head: new Image(), tail: new Image(), food: new Image(), decor: new Image() };
 
-// ===== BGM =====
 const audio = new Audio(); audio.loop = true; audio.volume = 0.45; audio.preload = 'auto';
 audio.addEventListener('ended', () => { if (musicEnabled && currentBgmKey) { audio.currentTime = 0; audio.play().catch(()=>{}); } });
 audio.addEventListener('error', () => { if (musicEnabled && currentBgmKey) { clearTimeout(bgmRetryTimer); bgmRetryTimer = setTimeout(() => { const url = BGM[currentBgmKey]; if (url) { audio.src = url; audio.play().catch(()=>{}); } }, 1500); } });
@@ -114,11 +131,16 @@ ctx.drawImage(img, cx - w/2, cy - h/2, w, h);
 return true;
 }
 function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+// 判断皮肤是否有独立贴图（暖色系）
+function isWarmSkin(skinId) { return ['shu','niu','hu','tu','long','she','ma','yang'].includes(skinId); }
 
-function createPlayer(id, headColors, bodyHue, startX, startY, startDir) {
+function createPlayer(id, headColors, bodyHue, startX, startY, startDir, skinId) {
+const body = [{x:startX, y:startY}];
+for (let i = 1; i <= 2; i++) {
+  body.push({ x: startX - startDir.x * i, y: startY - startDir.y * i });
+}
 return {
-  id: id,
-  body: [{x:startX,y:startY},{x:startX-1,y:startY},{x:startX-2,y:startY}],
+  id: id, body: body,
   dir: {...startDir}, nextDir: {...startDir},
   alive: true, score: 0,
   headColors: headColors, bodyHue: bodyHue,
@@ -126,11 +148,10 @@ return {
   ghostTrail: [],
   foodsEaten: 0, maxLen: 3, survivalTime: 0, fastEats: 0,
   cornerEaten: new Set(),
-  skinId: currentSkinId
+  skinId: skinId || 'default'
 };
 }
 
-// ===== 循环 =====
 function startLoop() { stopLoop(); lastFrameTs=0; accumulator=0; loopActive=true; rafId=requestAnimationFrame(frame); }
 function stopLoop() { loopActive=false; if (rafId) { cancelAnimationFrame(rafId); rafId=null; } }
 function frame(timestamp) {
@@ -154,20 +175,16 @@ if (loopActive && (!isGameOver || isDying)) { rafId = requestAnimationFrame(fram
 function initGame() {
 snakes = [];
 if (gameMode === 'single') {
-const skinObj = SKINS[currentSkinId] || SKINS.default;
-snakes.push(createPlayer('p1', skinObj.headColors || ['#5efce8','#00f5d4','#00bbf9'], skinObj.bodyHue || {r:0,g:235,b:220}, 12, 15, {x:1,y:0}));
-if (scoreEl.parentElement) {
-const lbl = scoreEl.parentElement.querySelector('.label');
-if (lbl) lbl.textContent = '积分';
-}
+const skinObj = SKINS[boardSkinId] || SKINS.default;
+snakes.push(createPlayer('p1', skinObj.headColors || ['#5efce8','#00f5d4','#00bbf9'], skinObj.bodyHue || {r:0,g:235,b:220}, 12, 15, {x:1,y:0}, boardSkinId));
+if (scoreEl.parentElement) { const lbl = scoreEl.parentElement.querySelector('.label'); if (lbl) lbl.textContent = '积分'; }
 score2Stat.style.display = 'none';
 } else {
-snakes.push(createPlayer('p1', ['#5efce8','#00f5d4','#00bbf9'], {r:0,g:235,b:220}, 12, 15, {x:1,y:0}));
-snakes.push(createPlayer('p2', P2_HEAD_COLORS, P2_BODY_HUE, 17, 15, {x:-1,y:0}));
-if (scoreEl.parentElement) {
-const lbl = scoreEl.parentElement.querySelector('.label');
-if (lbl) lbl.textContent = 'P1 积分';
-}
+const s1 = SKINS[p1SkinId] || SKINS.default;
+const s2 = SKINS[p2SkinId] || SKINS.default;
+snakes.push(createPlayer('p1', s1.headColors || ['#5efce8','#00f5d4','#00bbf9'], s1.bodyHue || {r:0,g:235,b:220}, 5, 5, {x:1,y:0}, p1SkinId));
+snakes.push(createPlayer('p2', s2.headColors || P2_HEAD_COLORS, s2.bodyHue || P2_BODY_HUE, 24, 24, {x:-1,y:0}, p2SkinId));
+if (scoreEl.parentElement) { const lbl = scoreEl.parentElement.querySelector('.label'); if (lbl) lbl.textContent = 'P1 积分'; }
 score2Stat.style.display = 'flex';
 score2El.textContent = '0';
 }
@@ -229,8 +246,7 @@ if (specialFood && specialFood.x===x && specialFood.y===y) continue;
 if (obstacles.some(o=>o.x===x&&o.y===y)) continue;
 if (portals.some(p=>p.x===x&&p.y===y)) continue;
 if (cat && cat.x===x && cat.y===y) continue;
-obstacles.push({x,y});
-break;
+obstacles.push({x,y}); break;
 }
 }
 function trySpawnPortal() {
@@ -388,60 +404,42 @@ playBgm('menu');
 
 function update() {
 if (isPaused || isGameOver) return;
-
 if (specialFood) { specialFoodTimer -= speed; if (specialFoodTimer <= 0) { specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 2000; } }
 if (specialFoodCooldown > 0) { specialFoodCooldown -= speed; if (specialFoodCooldown < 0) specialFoodCooldown = 0; }
-
 if (portals.length > 0) {
 const pairsToRemove = new Set();
 portals.forEach(p => { p.timer -= speed; if (p.timer <= 0) pairsToRemove.add(p.pairId); });
 if (pairsToRemove.size > 0) portals = portals.filter(p => !pairsToRemove.has(p.pairId));
 }
-
 if (!catActive && catModeEnabled && gameMode === 'single' && score >= CAT_ACTIVATE_SCORE) spawnCat();
-
 const alivePlayers = snakes.filter(p => p.alive);
 if (alivePlayers.length === 0) return;
-
 for (let idx = 0; idx < snakes.length; idx++) {
 const p = snakes[idx];
 if (!p.alive) continue;
 if (!p.body || p.body.length === 0) continue;
-
-snake = p.body;
-direction = p.dir;
-nextDirection = p.nextDir;
-currentPlayer = p;
-
+snake = p.body; direction = p.dir; nextDirection = p.nextDir; currentPlayer = p;
 let curSpeed = speed;
 if (p.speedBoost > 0) curSpeed = speed * 0.6;
 p.survivalTime += curSpeed / 1000;
-
 direction = { ...nextDirection };
 if (!snake[0]) continue;
 const head = { x: snake[0].x + direction.x, y: snake[0].y + direction.y };
-
-// 撞墙
 if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
 if (p.shield) { p.shield = false; showCheatToast('🛡️ 护盾抵挡了墙壁！'); p.dir = direction; p.nextDir = nextDirection; continue; }
 else { killPlayer(p, '撞墙了'); continue; }
 }
-
-// 传送门
 const enteredPortal = portals.find(pt => pt.x === head.x && pt.y === head.y);
 if (enteredPortal) {
 const pair = portals.find(pt => pt.pairId === enteredPortal.pairId && (pt.x !== enteredPortal.x || pt.y !== enteredPortal.y));
 if (pair) {
-head.x = pair.x;
-head.y = pair.y;
+head.x = pair.x; head.y = pair.y;
 vibrate([60,30,60]); shakeAmount = 15;
 spawnParticles(enteredPortal.x, enteredPortal.y, enteredPortal.color);
 spawnParticles(pair.x, pair.y, pair.color);
 showCheatToast('🌀 传送门穿越！');
 }
 }
-
-// 撞石头
 if (obstacles.some(o => o.x === head.x && o.y === head.y)) {
 if (p.shield) {
 p.shield = false;
@@ -450,14 +448,10 @@ showCheatToast('🛡️ 护盾撞碎了石头！');
 p.dir = direction; p.nextDir = nextDirection; continue;
 } else { killPlayer(p, '撞到石头了'); continue; }
 }
-
-// 撞自己
 if (snake.some(s => s.x === head.x && s.y === head.y)) {
 if (p.shield) { p.shield = false; showCheatToast('🛡️ 护盾抵挡了自咬！'); p.dir = direction; p.nextDir = nextDirection; continue; }
 else { killPlayer(p, '咬到自己了'); continue; }
 }
-
-// 撞其他玩家
 let hitOther = false;
 for (let j = 0; j < snakes.length; j++) {
 if (j === idx) continue;
@@ -469,20 +463,16 @@ if (hitOther) {
 if (p.shield) { p.shield = false; showCheatToast('🛡️ 护盾抵挡了对方！'); p.dir = direction; p.nextDir = nextDirection; continue; }
 else { killPlayer(p, '撞到对方了'); continue; }
 }
-
 snake.unshift(head);
 let ateSomething = false;
-
 if (head.x === food.x && head.y === food.y) {
-ateSomething = true;
-p.foodsEaten++;
+ateSomething = true; p.foodsEaten++;
 vibrate([100,40,100]); shakeAmount = 18;
 let baseScore = 10;
 if (p.speedBoost > 0) baseScore *= 2;
 p.score += baseScore;
 if (gameMode === 'single') score = p.score;
-if (p.id === 'p1') scoreEl.textContent = p.score;
-else score2El.textContent = p.score;
+if (p.id === 'p1') scoreEl.textContent = p.score; else score2El.textContent = p.score;
 p.maxLen = Math.max(p.maxLen, snake.length);
 const isCorner = (food.x===0||food.x===COLS-1) && (food.y===0||food.y===ROWS-1);
 if (isCorner) p.cornerEaten.add(food.x+','+food.y);
@@ -494,14 +484,10 @@ if (!specialFood && Math.random() < 0.35) spawnSpecialFood();
 if (p.foodsEaten % 3 === 0) trySpawnObstacle();
 if (p.foodsEaten % 15 === 0) trySpawnPortal();
 if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
-if (gameMode === 'double' && p.score >= WIN_SCORE) {
-const other = snakes.find(x=>x.id!==p.id);
-if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分');
-}
+if (gameMode === 'double' && p.score >= WIN_SCORE) { const other = snakes.find(x=>x.id!==p.id); if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分'); }
 lengthEl.textContent = p.body.length;
 } else if (specialFood && head.x === specialFood.x && head.y === specialFood.y) {
-ateSomething = true;
-p.foodsEaten++;
+ateSomething = true; p.foodsEaten++;
 vibrate([100,50,100]); shakeAmount = 22;
 let baseScore = 10;
 if (p.speedBoost > 0) baseScore *= 2;
@@ -511,30 +497,21 @@ else if (specialFood.type === 'shield') { p.shield = true; showCheatToast('🛡�
 else if (specialFood.type === 'shrink') { const newLen = Math.max(3, Math.floor(snake.length/2)); p.body = snake.slice(0, newLen); snake = p.body; lengthEl.textContent = p.body.length; showCheatToast('🧪 缩小药水！身体缩短一半！'); }
 p.score += baseScore;
 if (gameMode === 'single') score = p.score;
-if (p.id === 'p1') scoreEl.textContent = p.score;
-else score2El.textContent = p.score;
+if (p.id === 'p1') scoreEl.textContent = p.score; else score2El.textContent = p.score;
 p.maxLen = Math.max(p.maxLen, p.body.length);
 showScorePop(specialFood.x, specialFood.y, p.id);
 spawnParticles(specialFood.x, specialFood.y, '#ffaa00'); spawnParticles(specialFood.x, specialFood.y, '#ffffff');
 if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
-if (gameMode === 'double' && p.score >= WIN_SCORE) {
-const other = snakes.find(x=>x.id!==p.id);
-if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分');
-}
+if (gameMode === 'double' && p.score >= WIN_SCORE) { const other = snakes.find(x=>x.id!==p.id); if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分'); }
 specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 3000;
 }
-
 if (!ateSomething && snake.length > 0) snake.pop();
-
-p.body = snake;
-p.dir = direction;
-p.nextDir = nextDirection;
+p.body = snake; p.dir = direction; p.nextDir = nextDirection;
 if (snake.length > 0) {
 p.ghostTrail.push(snake.map(s => ({x:s.x, y:s.y})));
 if (p.ghostTrail.length > 22) p.ghostTrail.shift();
 }
 }
-
 if (snakes[0]) {
 maxLengthReached = snakes[0].maxLen;
 foodsEaten = snakes[0].foodsEaten;
@@ -542,9 +519,7 @@ fastEats = snakes[0].fastEats;
 survivalTime = Math.floor(snakes[0].survivalTime);
 cornerEaten = snakes[0].cornerEaten;
 }
-
 updateCat();
-
 if (catActive && cat && isCatTrapped()) {
 const cx = cat.x, cy = cat.y;
 catActive = false; cat = null; catTrail = []; catBiteLosses = 0;
@@ -559,7 +534,6 @@ if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highSco
 showCheatToast('🎉 你围死了野猫！奖励 50 分！');
 spawnParticles(cx, cy, '#ffaa00'); spawnParticles(cx, cy, '#ff4444');
 }
-
 const aliveNow = snakes.filter(p => p.alive);
 if (gameMode === 'double' && aliveNow.length <= 1) {
 if (aliveNow.length === 1) gameOver('对手已阵亡 · ' + aliveNow[0].id.toUpperCase() + ' 获胜！');
@@ -569,8 +543,7 @@ else gameOver('双方阵亡 · 平局！');
 
 function showScorePop(gx, gy, playerId) {
 const pop = document.createElement('div');
-pop.className = 'score-pop';
-pop.textContent = '+10';
+pop.className = 'score-pop'; pop.textContent = '+10';
 pop.style.left = ((gx+0.5)/COLS*100)+'%';
 pop.style.top = ((gy+0.5)/ROWS*100)+'%';
 if (playerId === 'p2') pop.style.color = '#f15bb5';
@@ -579,45 +552,38 @@ if (inner) inner.appendChild(pop);
 setTimeout(()=>pop.remove(), 850);
 }
 
-// ===== 绘制 =====
 function draw() {
 ctx.save();
 let shakeX=0, shakeY=0;
 if (shakeAmount > 0.1) { shakeX = (Math.random()-0.5)*shakeAmount; shakeY = (Math.random()-0.5)*shakeAmount; shakeAmount *= 0.90; } else { shakeAmount = 0; }
 ctx.translate(shakeX, shakeY);
-
-const skin = SKINS[currentSkinId] || SKINS.default;
-const isWarm = ['shu','niu','hu','tu','long','she','ma','yang'].includes(currentSkinId);
-if (isWarm) {
-drawWarmBoard(currentSkinId);
+// ★ 棋盘皮肤用 boardSkinId
+const boardSkin = SKINS[boardSkinId] || SKINS.default;
+if (isWarmSkin(boardSkinId)) {
+drawWarmBoard(boardSkinId);
 } else {
-ctx.fillStyle = skin.boardBg; ctx.fillRect(0,0,LOGICAL_SIZE,LOGICAL_SIZE);
-ctx.strokeStyle = skin.gridColor; ctx.lineWidth = 1.2;
+ctx.fillStyle = boardSkin.boardBg; ctx.fillRect(0,0,LOGICAL_SIZE,LOGICAL_SIZE);
+ctx.strokeStyle = boardSkin.gridColor; ctx.lineWidth = 1.2;
 for (let i=0; i<=COLS; i++) { ctx.beginPath(); ctx.moveTo(i*GRID,0); ctx.lineTo(i*GRID,LOGICAL_SIZE); ctx.stroke(); }
 for (let i=0; i<=ROWS; i++) { ctx.beginPath(); ctx.moveTo(0,i*GRID); ctx.lineTo(LOGICAL_SIZE,i*GRID); ctx.stroke(); }
 }
-
 obstacles.forEach(o => drawObstacle(o));
 portals.forEach(p => drawPortal(p));
 foodPulse += 0.09;
-drawFood(food, skin);
+drawFood(food, boardSkin);
 if (specialFood) drawSpecialFood(specialFood);
-
 snakes.forEach((p, idx) => {
 if (!p.alive || !p.body || p.body.length === 0) return;
 snake = p.body;
 drawPlayer(p, idx);
 });
-
 snakes.forEach(p => { if (p.alive && p.shield && p.body && p.body[0]) drawShield(p); });
 if (catActive && cat) drawCat();
-
 particles.forEach(p => { ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill(); });
 ctx.globalAlpha = 1;
 ctx.restore();
 }
 
-// ===== 棋盘绘制 =====
 function drawWarmBoard(skinId) {
 const light = skinId==='niu'?'#faf0dc':(skinId==='hu'?'#fff4e6':(skinId==='tu'?'#fff5f5':(skinId==='long'?'#f0faf5':(skinId==='she'?'#f2fbf0':(skinId==='ma'?'#fff8f0':(skinId==='yang'?'#f5f0ff':'#f8edd8'))))));
 const dark = skinId==='niu'?'#f0e0c0':(skinId==='hu'?'#ffe4cc':(skinId==='tu'?'#ffe4e8':(skinId==='long'?'#d4f0e5':(skinId==='she'?'#d9f0d4':(skinId==='ma'?'#f5e8d8':(skinId==='yang'?'#e8ddf5':'#f0e0c0'))))));
@@ -657,8 +623,7 @@ else { if (!drawImageHelper(SNAKE_ASSETS.leaf,bx,by,GRID*1.3)) { ctx.fillStyle='
 }
 
 function drawObstacle(o) {
-const bx = o.x * GRID + GRID/2;
-const by = o.y * GRID + GRID/2;
+const bx = o.x * GRID + GRID/2, by = o.y * GRID + GRID/2;
 ctx.fillStyle = 'rgba(0,0,0,0.4)';
 ctx.beginPath(); ctx.ellipse(bx, by + GRID*0.38, GRID*0.42, GRID*0.15, 0, 0, Math.PI*2); ctx.fill();
 const stoneGrad = ctx.createRadialGradient(bx - GRID*0.2, by - GRID*0.25, 2, bx, by, GRID*0.6);
@@ -674,8 +639,7 @@ ctx.beginPath(); ctx.arc(bx - GRID*0.15, by - GRID*0.18, GRID*0.1, 0, Math.PI*2)
 }
 
 function drawPortal(p) {
-const px = p.x * GRID + GRID/2;
-const py = p.y * GRID + GRID/2;
+const px = p.x * GRID + GRID/2, py = p.y * GRID + GRID/2;
 const rotation = performance.now()/1000 * 2;
 const pulse = 0.9 + Math.sin(performance.now()/1000 * 4) * 0.1;
 const glow = ctx.createRadialGradient(px, py, GRID*0.1, px, py, GRID*0.95);
@@ -693,20 +657,20 @@ ctx.beginPath(); ctx.arc(px, py, GRID*0.62, -Math.PI/2, -Math.PI/2 + Math.PI*2*t
 ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
 }
 
-function drawFood(fd, sk) {
+function drawFood(fd, boardSkin) {
 if (!fd) return;
 const pulse = 0.82 + Math.sin(foodPulse)*0.18;
-const fx = fd.x*GRID + GRID/2, fy = fd.y*GRID + GRID/2, fc = sk.foodColors;
+const fx = fd.x*GRID + GRID/2, fy = fd.y*GRID + GRID/2, fc = boardSkin.foodColors || ['#ff9a9a','#ff6b6b','#e03131'];
 const glow = ctx.createRadialGradient(fx,fy,2,fx,fy,GRID*1.3);
 glow.addColorStop(0, 'rgba(255,200,50,'+(0.4*pulse)+')'); glow.addColorStop(1, 'rgba(255,200,50,0)');
 ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(fx,fy,GRID*1.3,0,Math.PI*2); ctx.fill();
-if (currentSkinId === 'shu') {
+if (boardSkinId === 'shu') {
 ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.15,pulse*1.15);
 ctx.fillStyle='#ffd54a'; ctx.beginPath(); ctx.moveTo(-2,-9); ctx.lineTo(10,6); ctx.lineTo(-10,6); ctx.closePath(); ctx.fill();
 ctx.fillStyle='#e6b800'; ctx.beginPath(); ctx.moveTo(-2,-9); ctx.lineTo(-10,6); ctx.lineTo(-8,8); ctx.lineTo(0,-7); ctx.closePath(); ctx.fill();
 ctx.fillStyle='#ffe9a0'; ctx.beginPath(); ctx.arc(-1,0,2.4,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(3.5,3,1.8,0,Math.PI*2); ctx.fill();
 ctx.restore();
-} else if (currentSkinId === 'niu') {
+} else if (boardSkinId === 'niu') {
 ctx.save(); ctx.translate(fx,fy); ctx.rotate(Math.sin(foodPulse*1.3)*0.10-0.18); ctx.scale(pulse*1.08,pulse*1.08); ctx.lineJoin='round';
 const BELL_LINE='#7a4a1a';
 const bellPath = () => { ctx.beginPath(); ctx.moveTo(-7,3.5); ctx.bezierCurveTo(-7.6,-5,-4,-9,0,-9); ctx.bezierCurveTo(4,-9,7.6,-5,7,3.5); ctx.quadraticCurveTo(0,6.6,-7,3.5); ctx.closePath(); };
@@ -716,12 +680,12 @@ const bellFill = ctx.createLinearGradient(-5,-9,5,6); bellFill.addColorStop(0,'#
 bellPath(); ctx.fillStyle=bellFill; ctx.fill(); bellPath(); ctx.strokeStyle=BELL_LINE; ctx.lineWidth=1.5; ctx.stroke();
 ctx.beginPath(); ctx.arc(0,5.6,2.5,0,Math.PI*2); ctx.fillStyle='#ffd75e'; ctx.fill(); ctx.strokeStyle=BELL_LINE; ctx.lineWidth=1.3; ctx.stroke();
 ctx.restore();
-} else if (currentSkinId === 'hu') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(TIGER_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ff9b7a'; ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'tu') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(RABBIT_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ff8c00'; ctx.beginPath(); ctx.moveTo(0,-10); ctx.quadraticCurveTo(8,-2,0,12); ctx.quadraticCurveTo(-8,-2,0,-10); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'long') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(DRAGON_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'she') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(SNAKE_ASSETS.food,0,0,GRID*1.9)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.ellipse(0,2,9,10,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'ma') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(HORSE_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'yang') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(SHEEP_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ffb6c1'; ctx.fillRect(-8,-8,16,16); ctx.fillStyle='#ffe4a0'; ctx.fillRect(-8,-5,16,4); ctx.fillStyle='#b8e6b8'; ctx.fillRect(-8,-1,16,4); } ctx.restore(); }
+} else if (boardSkinId === 'hu') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(TIGER_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ff9b7a'; ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'tu') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(RABBIT_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ff8c00'; ctx.beginPath(); ctx.moveTo(0,-10); ctx.quadraticCurveTo(8,-2,0,12); ctx.quadraticCurveTo(-8,-2,0,-10); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'long') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(DRAGON_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'she') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(SNAKE_ASSETS.food,0,0,GRID*1.9)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.ellipse(0,2,9,10,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'ma') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(HORSE_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'yang') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(SHEEP_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ffb6c1'; ctx.fillRect(-8,-8,16,16); ctx.fillStyle='#ffe4a0'; ctx.fillRect(-8,-5,16,4); ctx.fillStyle='#b8e6b8'; ctx.fillRect(-8,-1,16,4); } ctx.restore(); }
 else {
 const foodGrad = ctx.createRadialGradient(fx-4,fy-4,1,fx,fy,GRID/2-1);
 foodGrad.addColorStop(0, fc[0]); foodGrad.addColorStop(0.55, fc[1]); foodGrad.addColorStop(1, fc[2]);
@@ -730,8 +694,7 @@ ctx.fillStyle = foodGrad; ctx.beginPath(); ctx.arc(fx,fy,(GRID/2-2.5)*pulse,0,Ma
 }
 
 function drawSpecialFood(sf) {
-const sfx = sf.x*GRID + GRID/2;
-const sfy = sf.y*GRID + GRID/2;
+const sfx = sf.x*GRID + GRID/2, sfy = sf.y*GRID + GRID/2;
 const sPulse = 0.9 + Math.sin(foodPulse*1.6)*0.15;
 const sGlow = ctx.createRadialGradient(sfx,sfy,2,sfx,sfy,GRID*1.6);
 sGlow.addColorStop(0,'rgba(255,255,255,0.6)'); sGlow.addColorStop(1,'rgba(255,255,255,0)');
@@ -765,13 +728,15 @@ ctx.beginPath(); ctx.moveTo(-5,-1); ctx.lineTo(5,-1); ctx.lineTo(5,9); ctx.quadr
 ctx.restore();
 }
 
+// ★★★ 关键：drawPlayer 用 p.skinId 绘制 ★★★
 function drawPlayer(p, idx) {
 if (!p || !p.body || p.body.length === 0) return;
+const pSkinId = p.skinId || 'default';
+const pSkin = SKINS[pSkinId] || SKINS.default;
 const bodyHue = p.bodyHue;
 const headColors = p.headColors;
 const ghostColor = p.id === 'p1' ? getGhostColorP1(p.score) : getGhostColorP2(p.score);
 
-// 残影
 p.ghostTrail.forEach((gs, index) => {
 if (!gs || gs.length === 0) return;
 const t = (index+1)/p.ghostTrail.length;
@@ -792,20 +757,12 @@ ctx.stroke();
 ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
 });
 
-// 蛇身
 p.body.forEach((seg, i) => {
 if (!seg) return;
 const x = seg.x*GRID, y = seg.y*GRID, isHead = i===0;
 const cx = x+GRID/2, cy = y+GRID/2;
 if (isHead) {
-if (p.id === 'p2' && !['shu','niu','hu','tu','long','she','ma','yang'].includes(currentSkinId)) {
-const headGlow = ctx.createRadialGradient(cx,cy,2,cx,cy,GRID*1.1);
-headGlow.addColorStop(0,'rgba(241,91,181,0.4)'); headGlow.addColorStop(1,'rgba(241,91,181,0)');
-ctx.fillStyle=headGlow; ctx.fillRect(x-5,y-5,GRID+10,GRID+10);
-const headGrad = ctx.createLinearGradient(x,y,x+GRID,y+GRID);
-headGrad.addColorStop(0, headColors[0]); headGrad.addColorStop(0.5, headColors[1]); headGrad.addColorStop(1, headColors[2]);
-ctx.fillStyle = headGrad; roundRect(ctx, x+1.5, y+1.5, GRID-3, GRID-3, 7); ctx.fill();
-} else if (currentSkinId === 'shu') {
+if (pSkinId === 'shu') {
 ctx.fillStyle='#e8c9a0'; ctx.beginPath(); ctx.ellipse(cx-9,cy-8,7,8,-0.3,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx+9,cy-8,7,8,0.3,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#f5d5b5'; ctx.beginPath(); ctx.ellipse(cx-9,cy-8,4,5,-0.3,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx+9,cy-8,4,5,0.3,0,Math.PI*2); ctx.fill();
 const hg = ctx.createRadialGradient(cx-3,cy-3,2,cx,cy,12); hg.addColorStop(0,'#f0e0c8'); hg.addColorStop(1,'#d4b896');
@@ -813,7 +770,7 @@ ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(cx,cy,11,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#4a3020'; ctx.beginPath(); ctx.arc(cx-4,cy-1,2.8,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx+4,cy-1,2.8,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(cx-3.2,cy-1.8,1.1,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx+4.8,cy-1.8,1.1,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#e89a8a'; ctx.beginPath(); ctx.ellipse(cx,cy+4,2.2,1.6,0,0,Math.PI*2); ctx.fill();
-} else if (currentSkinId === 'niu') {
+} else if (pSkinId === 'niu') {
 const STROKE='#6b3f22'; ctx.lineJoin='round';
 const drawHorn = (dir) => { ctx.beginPath(); ctx.moveTo(cx+dir*3.6,cy-9.5); ctx.bezierCurveTo(cx+dir*6.2,cy-15.5,cx+dir*9.2,cy-17.6,cx+dir*11.4,cy-18.2); ctx.bezierCurveTo(cx+dir*13.4,cy-14.5,cx+dir*10.8,cy-10,cx+dir*8.0,cy-7); ctx.closePath(); const hg=ctx.createLinearGradient(cx+dir*4,cy-15,cx+dir*12,cy-9); hg.addColorStop(0,'#fbe49e'); hg.addColorStop(1,'#f1bf4c'); ctx.fillStyle=hg; ctx.fill(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.3; ctx.stroke(); };
 drawHorn(-1); drawHorn(1);
@@ -825,19 +782,15 @@ facePath(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.8; ctx.stroke();
 [[-1],[1]].forEach(([dir]) => { ctx.beginPath(); ctx.arc(cx+dir*4.3,cy-0.6,3.6,0,Math.PI*2); ctx.fillStyle='#4a2c1a'; ctx.fill(); ctx.beginPath(); ctx.arc(cx+dir*3.2,cy-1.9,1.5,0,Math.PI*2); ctx.fillStyle='#ffffff'; ctx.fill(); });
 ctx.beginPath(); ctx.ellipse(cx,cy+4.2,2.5,1.8,0,0,Math.PI*2); ctx.fillStyle='#ff9eb5'; ctx.fill();
 ctx.beginPath(); ctx.arc(cx,cy+5.6,2.9,0.22,Math.PI-0.22); ctx.strokeStyle=STROKE; ctx.lineWidth=1.4; ctx.lineCap='round'; ctx.stroke();
-} else if (currentSkinId === 'hu') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(TIGER_ASSETS.head,0,0,GRID*1.9)) { ctx.fillStyle='#f5b06c'; ctx.beginPath(); ctx.arc(0,0,13,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'tu') { if (!drawImageHelper(RABBIT_ASSETS.head,cx,cy,GRID*1.9)) { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (currentSkinId === 'long') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(DRAGON_ASSETS.head,0,0,GRID*2.0)) { ctx.fillStyle='#e0f5ec'; ctx.beginPath(); ctx.arc(0,0,13,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'she') { if (!drawImageHelper(SNAKE_ASSETS.head,cx,cy,GRID*1.9)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (currentSkinId === 'ma') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(HORSE_ASSETS.head,0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'yang') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(SHEEP_ASSETS.head,0,0,GRID*2.0)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else { const headGlow = ctx.createRadialGradient(cx,cy,2,cx,cy,GRID*1.1); headGlow.addColorStop(0,'rgba(0,245,212,0.4)'); headGlow.addColorStop(1,'rgba(0,245,212,0)'); ctx.fillStyle=headGlow; ctx.fillRect(x-5,y-5,GRID+10,GRID+10); const headGrad = ctx.createLinearGradient(x,y,x+GRID,y+GRID); headGrad.addColorStop(0, headColors[0]); headGrad.addColorStop(0.5, headColors[1]); headGrad.addColorStop(1, headColors[2]); ctx.fillStyle=headGrad; roundRect(ctx,x+1.5,y+1.5,GRID-3,GRID-3,7); ctx.fill(); }
+} else if (pSkinId === 'hu') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(TIGER_ASSETS.head,0,0,GRID*1.9)) { ctx.fillStyle='#f5b06c'; ctx.beginPath(); ctx.arc(0,0,13,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'tu') { if (!drawImageHelper(RABBIT_ASSETS.head,cx,cy,GRID*1.9)) { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'long') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(DRAGON_ASSETS.head,0,0,GRID*2.0)) { ctx.fillStyle='#e0f5ec'; ctx.beginPath(); ctx.arc(0,0,13,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'she') { if (!drawImageHelper(SNAKE_ASSETS.head,cx,cy,GRID*1.9)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'ma') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(HORSE_ASSETS.head,0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'yang') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(SHEEP_ASSETS.head,0,0,GRID*2.0)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else { const headGlow = ctx.createRadialGradient(cx,cy,2,cx,cy,GRID*1.1); const glowCol = p.id === 'p2' ? 'rgba(241,91,181,' : 'rgba(0,245,212,'; headGlow.addColorStop(0, glowCol + '0.4)'); headGlow.addColorStop(1, glowCol + '0)'); ctx.fillStyle=headGlow; ctx.fillRect(x-5,y-5,GRID+10,GRID+10); const headGrad = ctx.createLinearGradient(x,y,x+GRID,y+GRID); headGrad.addColorStop(0, headColors[0]); headGrad.addColorStop(0.5, headColors[1]); headGrad.addColorStop(1, headColors[2]); ctx.fillStyle=headGrad; roundRect(ctx,x+1.5,y+1.5,GRID-3,GRID-3,7); ctx.fill(); }
 } else {
-if (p.id === 'p2' && !['shu','niu','hu','tu','long','she','ma','yang'].includes(currentSkinId)) {
-const hue = p.bodyHue; const t = i/Math.max(p.body.length-1,1);
-ctx.fillStyle = 'rgb('+Math.floor(hue.r+t*20)+','+Math.floor(hue.g-t*30)+','+Math.floor(hue.b-t*20)+')';
-const inset = 2.5+t*1.8; roundRect(ctx, x+inset, y+inset, GRID-inset*2, GRID-inset*2, 5.5); ctx.fill();
-} else if (currentSkinId === 'niu') {
+if (pSkinId === 'niu') {
 const scx=x+GRID/2, scy=y+GRID/2; let angle = -Math.PI/2;
 if (i>0 && p.body[i-1]) { const prev = p.body[i-1]; angle = Math.atan2(prev.y-seg.y, prev.x-seg.x); }
 ctx.save(); ctx.translate(scx,scy); ctx.rotate(angle+Math.PI/2);
@@ -847,17 +800,17 @@ ctx.fillStyle='#fffdf5'; ctx.strokeStyle='#fffdf5'; ctx.lineWidth=3.2; bodyPath(
 bodyPath(); ctx.fillStyle='#ffffff'; ctx.fill();
 bodyPath(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.2; ctx.stroke();
 ctx.restore();
-} else if (currentSkinId === 'hu') { if (!drawImageHelper(TIGER_ASSETS.body,cx,cy,GRID*1.8)) { ctx.fillStyle='#f5b06c'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (currentSkinId === 'tu') { if (!drawImageHelper(RABBIT_ASSETS.body,cx,cy,GRID*1.9)) { ctx.fillStyle='#ffe4e8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (currentSkinId === 'long') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper(DRAGON_ASSETS.tail,0,0,GRID*1.9)) { ctx.fillStyle='#a8e6cf'; ctx.beginPath(); ctx.ellipse(0,0,12,9,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'she') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h); if (Math.abs(a2h)>Math.PI/2) ctx.scale(1,-1); if (!drawImageHelper(SNAKE_ASSETS.tail,0,0,GRID*1.2)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'ma') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper(HORSE_ASSETS.tail,0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (currentSkinId === 'yang') { if (!drawImageHelper(SHEEP_ASSETS.tail,cx,cy,GRID*1.9)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (currentSkinId === 'shu') {
+} else if (pSkinId === 'hu') { if (!drawImageHelper(TIGER_ASSETS.body,cx,cy,GRID*1.8)) { ctx.fillStyle='#f5b06c'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'tu') { if (!drawImageHelper(RABBIT_ASSETS.body,cx,cy,GRID*1.9)) { ctx.fillStyle='#ffe4e8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'long') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper(DRAGON_ASSETS.tail,0,0,GRID*1.9)) { ctx.fillStyle='#a8e6cf'; ctx.beginPath(); ctx.ellipse(0,0,12,9,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'she') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h); if (Math.abs(a2h)>Math.PI/2) ctx.scale(1,-1); if (!drawImageHelper(SNAKE_ASSETS.tail,0,0,GRID*1.2)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'ma') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper(HORSE_ASSETS.tail,0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'yang') { if (!drawImageHelper(SHEEP_ASSETS.tail,cx,cy,GRID*1.9)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'shu') {
 const scx=x+GRID/2, scy=y+GRID/2;
 ctx.fillStyle='#f0e0c8'; ctx.beginPath(); ctx.arc(scx,scy,8.5,0,Math.PI*2); ctx.fill();
 } else {
-const hue = p.id === 'p1' ? skin.bodyHue : p.bodyHue;
+const hue = p.bodyHue;
 const t = i/Math.max(p.body.length-1,1);
 ctx.fillStyle = 'rgb('+Math.floor(hue.r+t*40)+','+Math.floor(hue.g-t*60)+','+Math.floor(hue.b-t*40)+')';
 const inset = 2.5+t*1.8; roundRect(ctx, x+inset, y+inset, GRID-inset*2, GRID-inset*2, 5.5); ctx.fill();

@@ -63,6 +63,38 @@
 <div id="achieveModal"><div class="achieve-box"><div class="achieve-header"><h3>📜 江湖成就</h3><div style="display:flex;align-items:center;gap:10px;"><span class="achieve-count" id="achieveCount">0/12</span><button class="close-btn" id="closeAchieve">×</button></div></div><div class="achieve-list" id="achieveList"></div></div></div>
 <div id="skinModal"><div class="achieve-box" style="max-width:480px;"><div class="achieve-header"><h3>🎨 生肖皮肤</h3><button class="close-btn" id="closeSkin">×</button></div><div class="skin-list" id="skinList" style="padding:16px; display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:12px; max-height:55vh; overflow-y:auto;"></div></div></div>
 <div id="guideModal"><div class="guide-box"><div class="guide-header"><h3>📖 游戏指南</h3><button class="close-btn" id="closeGuide">×</button></div><div class="guide-body"><div class="guide-nav" id="guideNav"></div><div class="guide-content" id="guideContent"></div></div></div></div>
+
+<!-- ===== 双人皮肤选择弹窗 ===== -->
+<div id="dualSkinModal">
+  <div class="dual-skin-box">
+    <div class="dual-skin-header">
+      <h3 id="dualSkinTitle">🎨 选择棋盘皮肤</h3>
+      <button class="close-btn" id="closeDualSkin">×</button>
+    </div>
+    <div class="dual-skin-body">
+      <!-- 第一页：选棋盘 -->
+      <div id="dualPageBoard" class="dual-page">
+        <p class="dual-hint">选一个你喜欢的棋盘风格（会影响格子、食物等视觉效果）</p>
+        <div class="dual-grid" id="dualBoardGrid"></div>
+      </div>
+      <!-- 第二页：选蛇皮肤 -->
+      <div id="dualPageSnake" class="dual-page" style="display:none;">
+        <div class="dual-section dual-p1-section">
+          <p class="dual-hint"><span class="dual-tag tag-p1">P1</span> 选择你的贪吃蛇皮肤</p>
+          <div class="dual-grid" id="dualP1Grid"></div>
+        </div>
+        <div class="dual-section dual-p2-section">
+          <p class="dual-hint"><span class="dual-tag tag-p2">P2</span> 选择你的贪吃蛇皮肤</p>
+          <div class="dual-grid" id="dualP2Grid"></div>
+        </div>
+      </div>
+    </div>
+    <div class="dual-skin-footer">
+      <button class="dual-next-btn" id="dualNextBtn">下一步 →</button>
+    </div>
+  </div>
+</div>
+
 <div id="achieveToast"><div class="toast-icon" id="toastIcon">🏆</div><div class="toast-text"><h4>成就解锁</h4><p id="toastName">初入江湖</p></div></div>
 <script src="data.js"></script>
 <script src="game.js"></script>

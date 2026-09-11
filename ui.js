@@ -11,7 +11,6 @@ achieveListEl.appendChild(item);
 achieveCountEl.textContent = unlockedCount + '/' + ACHIEVEMENTS.length;
 }
 function checkAchievements() {
-// 双人模式不检查成就（分数、体长等来自 P1，会误判）
 if (gameMode === 'double') { renderAchievements(); return; }
 let newly = [];
 ACHIEVEMENTS.forEach(a => { if (!unlocked.includes(a.id) && a.check()) { unlocked.push(a.id); newly.push(a); } });
@@ -38,8 +37,10 @@ saveAchievements(); renderAchievements(); renderSkins(); draw();
 showCheatToast('✨ 1314 作弊成功 · 全部皮肤 + 成就已解锁！');
 }
 
-// ===== 皮肤 UI =====
+// ===== 皮肤解锁判断 =====
 function isSkinUnlocked(skin) { return !skin.unlockId || unlocked.includes(skin.unlockId) || cheatSkins.has(skin.unlockId); }
+
+// ===== 单人皮肤 UI =====
 function renderSkins() {
 skinListEl.innerHTML = '';
 Object.values(SKINS).forEach(skin => {
@@ -49,13 +50,15 @@ card.className = 'skin-card' + (currentSkinId === skin.id ? ' active' : '') + (!
 card.innerHTML = '<div class="skin-emoji">'+skin.emoji+'</div><div class="skin-name">'+skin.name+'</div>'+( !unlockedSkin ? '<div class="skin-lock">🔒 未解锁</div>' : (currentSkinId === skin.id ? '<div class="skin-lock" style="color:#00f5d4">使用中</div>' : '') );
 if (unlockedSkin) card.addEventListener('click', () => {
 currentSkinId = skin.id;
+boardSkinId = skin.id;
 localStorage.setItem('snakeCurrentSkin', currentSkinId);
+localStorage.setItem('snakeBoardSkin', boardSkinId);
 renderSkins();
-// 如果游戏正在进行且是单人模式，立即刷新当前蛇的皮肤数据
 if (!isGameOver && snakes[0]) {
 const skinObj = SKINS[currentSkinId] || SKINS.default;
 snakes[0].headColors = skinObj.headColors || ['#5efce8','#00f5d4','#00bbf9'];
 snakes[0].bodyHue = skinObj.bodyHue || {r:0,g:235,b:220};
+snakes[0].skinId = currentSkinId;
 }
 draw();
 });
@@ -145,6 +148,92 @@ updateModeButtons();
 updateCatModeBtn();
 updateObsModeBtn();
 
+// ===== 双人皮肤选择弹窗 =====
+let dualStep = 'board'; // 'board' | 'snake'
+
+function openDualSkinModal() {
+dualStep = 'board';
+dualSelectedBoardId = boardSkinId;
+dualSelectedP1 = p1SkinId || 'default';
+dualSelectedP2 = p2SkinId || 'default';
+dualPageBoard.style.display = 'block';
+dualPageSnake.style.display = 'none';
+dualSkinTitle.textContent = '🎨 第一步：选择棋盘皮肤';
+dualNextBtn.textContent = '下一步 →';
+renderDualBoard();
+dualSkinModal.classList.add('show');
+}
+
+function renderDualBoard() {
+dualBoardGrid.innerHTML = '';
+Object.values(SKINS).forEach(skin => {
+const unlocked = isSkinUnlocked(skin);
+const card = document.createElement('div');
+card.className = 'dual-skin-card' + (dualSelectedBoardId === skin.id ? ' active' : '') + (!unlocked ? ' locked' : '');
+card.innerHTML = '<div class="ds-emoji">'+skin.emoji+'</div><div class="ds-name">'+skin.name+'</div>';
+if (unlocked) card.addEventListener('click', () => {
+dualSelectedBoardId = skin.id;
+renderDualBoard();
+});
+dualBoardGrid.appendChild(card);
+});
+}
+
+function renderDualSnakeGrid(which) {
+const grid = which === 'p1' ? dualP1Grid : dualP2Grid;
+const selected = which === 'p1' ? dualSelectedP1 : dualSelectedP2;
+grid.innerHTML = '';
+Object.values(SKINS).forEach(skin => {
+const unlocked = isSkinUnlocked(skin);
+const card = document.createElement('div');
+card.className = 'dual-skin-card' + (selected === skin.id ? ' active' : '') + (!unlocked ? ' locked' : '');
+card.innerHTML = '<div class="ds-emoji">'+skin.emoji+'</div><div class="ds-name">'+skin.name+'</div>';
+if (unlocked) card.addEventListener('click', () => {
+if (which === 'p1') dualSelectedP1 = skin.id;
+else dualSelectedP2 = skin.id;
+renderDualSnakeGrid(which);
+});
+grid.appendChild(card);
+});
+}
+
+function renderDualSnake() {
+renderDualSnakeGrid('p1');
+renderDualSnakeGrid('p2');
+}
+
+dualNextBtn.addEventListener('click', () => {
+if (dualStep === 'board') {
+dualStep = 'snake';
+dualPageBoard.style.display = 'none';
+dualPageSnake.style.display = 'block';
+dualSkinTitle.textContent = '🐍 第二步：选择各自的蛇皮肤';
+dualNextBtn.textContent = '开始游戏';
+renderDualSnake();
+} else {
+// 保存选择
+boardSkinId = dualSelectedBoardId;
+currentSkinId = boardSkinId;
+p1SkinId = dualSelectedP1;
+p2SkinId = dualSelectedP2;
+localStorage.setItem('snakeBoardSkin', boardSkinId);
+localStorage.setItem('snakeCurrentSkin', boardSkinId);
+localStorage.setItem('snakeP1Skin', p1SkinId);
+localStorage.setItem('snakeP2Skin', p2SkinId);
+dualSkinModal.classList.remove('show');
+// 直接开始双人对战
+startBtn.style.display = 'block';
+stopLoop();
+initGame();
+startLoop();
+}
+});
+
+closeDualSkinBtn.addEventListener('click', () => {
+dualSkinModal.classList.remove('show');
+});
+dualSkinModal.addEventListener('click', (e) => { if (e.target === dualSkinModal) dualSkinModal.classList.remove('show'); });
+
 // ===== 手机端作弊：连点标题 5 次 =====
 let titleTapCount = 0;
 let titleTapTimer = null;
@@ -156,29 +245,21 @@ titleTapTimer = setTimeout(() => { titleTapCount = 0; }, 2000);
 });
 
 // ===== 键盘 =====
-// P1: W A S D    P2: ↑ ↓ ← →
 let cheatBuffer = '';
 document.addEventListener('keydown', (e) => {
 const key = e.key.toLowerCase();
 if (['arrowup','arrowdown','arrowleft','arrowright',' ','w','a','s','d'].includes(key)) e.preventDefault();
-
 if (key === ' ') { togglePause(); return; }
-
-// P1 控制（WASD）
 if (key === 'w') setDirection(0, 'up');
 else if (key === 's') setDirection(0, 'down');
 else if (key === 'a') setDirection(0, 'left');
 else if (key === 'd') setDirection(0, 'right');
-
-// P2 控制（方向键）- 仅双人模式
 if (gameMode === 'double') {
 if (key === 'arrowup') setDirection(1, 'up');
 else if (key === 'arrowdown') setDirection(1, 'down');
 else if (key === 'arrowleft') setDirection(1, 'left');
 else if (key === 'arrowright') setDirection(1, 'right');
 }
-
-// 作弊码
 if (e.key >= '0' && e.key <= '9') {
 cheatBuffer += e.key;
 if (cheatBuffer.length > 6) cheatBuffer = cheatBuffer.slice(-6);
@@ -189,7 +270,7 @@ else if (cheatBuffer.endsWith('1314')) { cheatUnlockAll(); cheatBuffer=''; }
 document.addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('gesturestart', e => e.preventDefault());
 
-// ===== 方向键（手机端单人用） =====
+// ===== 方向键 =====
 const dpadButtons = document.querySelectorAll('.dpad button[data-dir]');
 if (window.PointerEvent) {
 dpadButtons.forEach(btn => {
@@ -208,7 +289,16 @@ btn.addEventListener('mousedown', e => { e.preventDefault(); setDirection(0, btn
 document.getElementById('mobilePause').addEventListener('click', togglePause);
 
 // ===== 按钮绑定 =====
-startBtn.addEventListener('click', () => { startBtn.style.display='block'; startGame(); });
+startBtn.addEventListener('click', () => {
+if (gameMode === 'double') {
+// 双人：先打开皮肤选择弹窗
+openDualSkinModal();
+} else {
+// 单人：直接开始
+startBtn.style.display='block';
+startGame();
+}
+});
 document.getElementById('achieveBtn').addEventListener('click', () => { renderAchievements(); achieveModal.classList.add('show'); });
 document.getElementById('closeAchieve').addEventListener('click', () => achieveModal.classList.remove('show'));
 achieveModal.addEventListener('click', (e) => { if (e.target === achieveModal) achieveModal.classList.remove('show'); });
@@ -249,6 +339,9 @@ progressBar.style.width = '100%';
 loadingText.textContent = '100%';
 setTimeout(() => {
 loadingScreen.style.display = 'none';
+// 从本地读回双人皮肤
+p1SkinId = localStorage.getItem('snakeP1Skin') || 'default';
+p2SkinId = localStorage.getItem('snakeP2Skin') || 'default';
 initGame();
 renderAchievements();
 draw();
