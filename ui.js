@@ -37,6 +37,96 @@ saveAchievements(); renderAchievements(); renderSkins(); draw();
 showCheatToast('✨ 1314 作弊成功 · 全部皮肤 + 成就已解锁！');
 }
 
+// ==================== ★ AI 评语配置（智谱 + 代理） ★ ====================
+const AI_API_KEY  = '691e8784c6954ae9be22fe6a49bba291.FNecmlca4jQOQoH6'; // ★ 替换为你第一步拿到的 Key
+const AI_BASE_URL = 'https://zhipu.wange5232.workers.dev/v4'; // ★ 替换为你的 Worker 地址，注意末尾要加上 /v4 
+const AI_MODEL    = 'glm-4-flash'; // 免费的快速模型
+/**
+ * 流式生成 AI 评语，逐字显示到 targetEl
+ */
+async function generateAIComment(prompt, targetEl) {
+if (!targetEl) return;
+if (!AI_API_KEY || AI_API_KEY === '你的Groq_Key') {
+targetEl.textContent = getFallbackComment();
+return;
+}
+targetEl.textContent = '🤖 AI 正在思考...';
+targetEl.style.opacity = '0.7';
+
+try {
+const response = await fetch(AI_BASE_URL + '/chat/completions', {
+method: 'POST',
+headers: {
+'Content-Type': 'application/json',
+'Authorization': 'Bearer ' + AI_API_KEY
+},
+body: JSON.stringify({
+model: AI_MODEL,
+messages: [{ role: 'user', content: prompt }],
+stream: true,
+temperature: 0.9,
+max_tokens: 80
+})
+});
+
+if (!response.ok) {
+console.warn('Groq API 返回错误:', response.status);
+throw new Error('API ' + response.status);
+}
+
+const reader = response.body.getReader();
+const decoder = new TextDecoder('utf-8');
+let buffer = '';
+let fullText = '';
+targetEl.textContent = '';
+targetEl.style.opacity = '1';
+
+while (true) {
+const { done, value } = await reader.read();
+if (done) break;
+buffer += decoder.decode(value, { stream: true });
+const lines = buffer.split('\n');
+buffer = lines.pop() || '';
+for (const line of lines) {
+const trimmed = line.trim();
+if (!trimmed || !trimmed.startsWith('data:')) continue;
+const dataStr = trimmed.slice(5).trim();
+if (dataStr === '[DONE]') continue;
+try {
+const json = JSON.parse(dataStr);
+const delta = json.choices && json.choices[0] && json.choices[0].delta && json.choices[0].delta.content;
+if (delta) { fullText += delta; targetEl.textContent = fullText; }
+} catch (e) {}
+}
+}
+if (!fullText.trim()) targetEl.textContent = getFallbackComment();
+} catch (err) {
+console.warn('AI 评语失败:', err);
+targetEl.textContent = getFallbackComment();
+}
+}
+
+// 本地兜底评语
+function getFallbackComment() {
+const list = [
+'宝宝，这走位江湖上怕是要传开了！',
+'差一点就破纪录，下次一定行！',
+'这蛇走的，比隔壁老王家的猫还溜。',
+'积分不错，离大侠就差那么一点点。',
+'哎哟，这操作看得我眼花缭乱！'
+];
+return list[Math.floor(Math.random() * list.length)];
+}
+
+// 根据游戏数据构建提示词
+function buildAIPrompt() {
+const p = (snakes && snakes[0]) || {};
+const s = p.score || 0;
+const l = (p.body && p.body.length) || 3;
+const f = p.foodsEaten || 0;
+return '你是风趣幽默的游戏解说员。用一句话（不超过40字）给玩家一个专属评语，语气活泼有梗、带江湖气息。直接输出评语，不加引号、不加标点前缀。玩家数据：积分' + s + '，体长' + l + '，吃掉食物' + f + '个。';
+}
+
 // ===== 皮肤解锁判断 =====
 function isSkinUnlocked(skin) { return !skin.unlockId || unlocked.includes(skin.unlockId) || cheatSkins.has(skin.unlockId); }
 
@@ -149,7 +239,7 @@ updateCatModeBtn();
 updateObsModeBtn();
 
 // ===== 双人皮肤选择弹窗 =====
-let dualStep = 'board'; // 'board' | 'snake'
+let dualStep = 'board';
 
 function openDualSkinModal() {
 dualStep = 'board';
@@ -171,10 +261,7 @@ const unlocked = isSkinUnlocked(skin);
 const card = document.createElement('div');
 card.className = 'dual-skin-card' + (dualSelectedBoardId === skin.id ? ' active' : '') + (!unlocked ? ' locked' : '');
 card.innerHTML = '<div class="ds-emoji">'+skin.emoji+'</div><div class="ds-name">'+skin.name+'</div>';
-if (unlocked) card.addEventListener('click', () => {
-dualSelectedBoardId = skin.id;
-renderDualBoard();
-});
+if (unlocked) card.addEventListener('click', () => { dualSelectedBoardId = skin.id; renderDualBoard(); });
 dualBoardGrid.appendChild(card);
 });
 }
@@ -189,18 +276,13 @@ const card = document.createElement('div');
 card.className = 'dual-skin-card' + (selected === skin.id ? ' active' : '') + (!unlocked ? ' locked' : '');
 card.innerHTML = '<div class="ds-emoji">'+skin.emoji+'</div><div class="ds-name">'+skin.name+'</div>';
 if (unlocked) card.addEventListener('click', () => {
-if (which === 'p1') dualSelectedP1 = skin.id;
-else dualSelectedP2 = skin.id;
+if (which === 'p1') dualSelectedP1 = skin.id; else dualSelectedP2 = skin.id;
 renderDualSnakeGrid(which);
 });
 grid.appendChild(card);
 });
 }
-
-function renderDualSnake() {
-renderDualSnakeGrid('p1');
-renderDualSnakeGrid('p2');
-}
+function renderDualSnake() { renderDualSnakeGrid('p1'); renderDualSnakeGrid('p2'); }
 
 dualNextBtn.addEventListener('click', () => {
 if (dualStep === 'board') {
@@ -211,7 +293,6 @@ dualSkinTitle.textContent = '🐍 第二步：选择各自的蛇皮肤';
 dualNextBtn.textContent = '开始游戏';
 renderDualSnake();
 } else {
-// 保存选择
 boardSkinId = dualSelectedBoardId;
 currentSkinId = boardSkinId;
 p1SkinId = dualSelectedP1;
@@ -221,7 +302,6 @@ localStorage.setItem('snakeCurrentSkin', boardSkinId);
 localStorage.setItem('snakeP1Skin', p1SkinId);
 localStorage.setItem('snakeP2Skin', p2SkinId);
 dualSkinModal.classList.remove('show');
-// 直接开始双人对战
 startBtn.style.display = 'block';
 stopLoop();
 initGame();
@@ -229,9 +309,7 @@ startLoop();
 }
 });
 
-closeDualSkinBtn.addEventListener('click', () => {
-dualSkinModal.classList.remove('show');
-});
+closeDualSkinBtn.addEventListener('click', () => { dualSkinModal.classList.remove('show'); });
 dualSkinModal.addEventListener('click', (e) => { if (e.target === dualSkinModal) dualSkinModal.classList.remove('show'); });
 
 // ===== 手机端作弊：连点标题 5 次 =====
@@ -290,14 +368,8 @@ document.getElementById('mobilePause').addEventListener('click', togglePause);
 
 // ===== 按钮绑定 =====
 startBtn.addEventListener('click', () => {
-if (gameMode === 'double') {
-// 双人：先打开皮肤选择弹窗
-openDualSkinModal();
-} else {
-// 单人：直接开始
-startBtn.style.display='block';
-startGame();
-}
+if (gameMode === 'double') { openDualSkinModal(); }
+else { startBtn.style.display='block'; startGame(); }
 });
 document.getElementById('achieveBtn').addEventListener('click', () => { renderAchievements(); achieveModal.classList.add('show'); });
 document.getElementById('closeAchieve').addEventListener('click', () => achieveModal.classList.remove('show'));
@@ -339,7 +411,6 @@ progressBar.style.width = '100%';
 loadingText.textContent = '100%';
 setTimeout(() => {
 loadingScreen.style.display = 'none';
-// 从本地读回双人皮肤
 p1SkinId = localStorage.getItem('snakeP1Skin') || 'default';
 p2SkinId = localStorage.getItem('snakeP2Skin') || 'default';
 initGame();

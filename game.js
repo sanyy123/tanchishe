@@ -399,6 +399,13 @@ overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && 
 startBtn.textContent = '再次入世';
 overlay.classList.remove('hidden');
 playBgm('menu');
+// ★ 触发 AI 评语
+setTimeout(() => {
+const el = document.getElementById('aiComment');
+if (el && typeof generateAIComment === 'function') {
+generateAIComment(buildAIPrompt(), el);
+}
+}, 200);
 }, 1200);
 }
 
