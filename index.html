@@ -11,7 +11,7 @@ body { min-height: 100vh; display: flex; flex-direction: column; align-items: ce
 body::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; background: radial-gradient(ellipse 80% 50% at 20% 40%, rgba(0,245,212,0.12) 0%, transparent 50%), radial-gradient(ellipse 60% 40% at 80% 60%, rgba(155,93,229,0.15) 0%, transparent 50%), radial-gradient(ellipse 50% 30% at 50% 90%, rgba(0,187,249,0.1) 0%, transparent 50%); animation: bgPulse 8s ease-in-out infinite alternate; }
 @keyframes bgPulse { 0% { opacity: 0.7; transform: scale(1); } 100% { opacity: 1; transform: scale(1.05); } }
 .title-area { text-align: center; margin-bottom: 12px; position: relative; z-index: 2; }
-h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: 2px; background: linear-gradient(105deg, #00f5d4 0%, #00bbf9 35%, #9b5de5 70%, #f15bb5 100%); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shine 4s linear infinite; filter: drop-shadow(0 0 14px rgba(0,245,212,0.4)); }
+h1 { font-size: 2.5rem; font-weight: 800; letter-spacing: 2px; background: linear-gradient(105deg, #00f5d4 0%, #00bbf9 35%, #9b5de5 70%, #f15bb5 100%); background-size: 200% auto; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: shine 4s linear infinite; filter: drop-shadow(0 0 14px rgba(0,245,212,0.4)); cursor: pointer; user-select: none; }
 @keyframes shine { to { background-position: 200% center; } }
 .subtitle { font-size: 0.95rem; color: #94a3b8; margin-top: 4px; letter-spacing: 1px; }
 .top-bar { display: flex; gap: 5px; margin-bottom: 14px; position: relative; z-index: 2; width: 100%; max-width: 600px; justify-content: center; flex-wrap: nowrap; }
@@ -86,7 +86,6 @@ canvas { display: block; background: #0d1117; width: 100%; height: 100%; }
 .dpad button:active, .dpad button.pressed { background: rgba(0,245,212,0.3); border-color: #00f5d4; transform: scale(0.92); }
 .dpad .up { grid-column: 2; grid-row: 1; } .dpad .left { grid-column: 1; grid-row: 2; } .dpad .right { grid-column: 3; grid-row: 2; } .dpad .down { grid-column: 2; grid-row: 3; } .dpad .pause-btn { grid-column: 2; grid-row: 2; font-size: 0.95rem; font-weight: 700; color: #94a3b8; }
 .music-hint { font-size: 0.75rem; color: #64748b; margin-top: 6px; text-align: center; position: relative; z-index: 2; }
-/* ===== 指南弹窗 ===== */
 .guide-box { width: 92%; max-width: 720px; height: 80vh; max-height: 620px; background: rgba(15,23,42,0.98); border-radius: 20px; border: 1px solid rgba(0,245,212,0.3); box-shadow: 0 25px 60px rgba(0,0,0,0.5), 0 0 40px rgba(0,245,212,0.15); display: flex; flex-direction: column; overflow: hidden; }
 .guide-header { padding: 14px 20px; border-bottom: 1px solid rgba(148,163,184,0.15); display: flex; align-items: center; justify-content: space-between; background: linear-gradient(90deg, rgba(0,245,212,0.1), rgba(155,93,229,0.1)); flex-shrink: 0; }
 .guide-header h3 { font-size: 1.15rem; font-weight: 800; background: linear-gradient(90deg, #00f5d4, #9b5de5); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
@@ -362,7 +361,14 @@ showCheatToast('✨ 1314 作弊成功 · 全部皮肤 + 成就已解锁！');
 const BASE_SPEED = 160, MIN_SPEED = 70;
 function calcSpeed() { const step = Math.floor(score/50); return Math.max(MIN_SPEED, BASE_SPEED - step*6); }
 
-function vibrate(pattern) { if (navigator.vibrate) { try { navigator.vibrate(pattern); } catch(e){} } }
+// ===== 手机震动加强 + 唤醒权限 =====
+function vibrate(pattern) {
+    if (!navigator.vibrate) return;
+    try { navigator.vibrate(pattern); } catch(e) {}
+}
+document.addEventListener('touchstart', () => {
+    try { if (navigator.vibrate) navigator.vibrate(1); } catch(e) {}
+}, { once: true });
 
 function recordGhost() {
 if (!snake) return;
@@ -604,6 +610,7 @@ const foodGrad = ctx.createRadialGradient(fx-4,fy-4,1,fx,fy,GRID/2-1);
 foodGrad.addColorStop(0, fc[0]); foodGrad.addColorStop(0.55, fc[1]); foodGrad.addColorStop(1, fc[2]);
 ctx.fillStyle = foodGrad; ctx.beginPath(); ctx.arc(fx,fy,(GRID/2-2.5)*pulse,0,Math.PI*2); ctx.fill();
 }
+// ===== 特殊食物 emoji 图标 =====
 if (specialFood) {
 const sfx = specialFood.x*GRID + GRID/2;
 const sfy = specialFood.y*GRID + GRID/2;
@@ -617,23 +624,13 @@ ctx.arc(sfx, sfy, GRID*0.85, -Math.PI/2, -Math.PI/2 + Math.PI*2*timerRatio);
 ctx.strokeStyle = timerRatio > 0.3 ? 'rgba(255,255,255,0.75)' : 'rgba(255,80,80,0.9)';
 ctx.lineWidth = 2.5; ctx.stroke();
 ctx.save(); ctx.translate(sfx,sfy); ctx.scale(sPulse,sPulse);
-if (specialFood.type === 'gold') {
-ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.ellipse(0,0,10,7,0,0,Math.PI*2); ctx.fill();
-ctx.fillStyle='#ffaa00'; ctx.beginPath(); ctx.ellipse(0,2,8,4,0,0,Math.PI*2); ctx.fill();
-ctx.fillStyle='#ffef99'; ctx.beginPath(); ctx.ellipse(-2,-2,4,2.5,0,0,Math.PI*2); ctx.fill();
-} else if (specialFood.type === 'speed') {
-roundRect(ctx,-5,-8,10,16,3); ctx.fillStyle='#4a90d9'; ctx.fill();
-roundRect(ctx,-4,-6,8,12,2); ctx.fillStyle='#a0d0ff'; ctx.fill();
-ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(-2,-3,1.5,0,Math.PI*2); ctx.fill();
-} else if (specialFood.type === 'shield') {
-ctx.fillStyle='#ffcc00'; ctx.beginPath(); ctx.arc(0,0,9,Math.PI,0); ctx.lineTo(9,6); ctx.lineTo(-9,6); ctx.closePath(); ctx.fill();
-ctx.fillStyle='#ffee88'; ctx.beginPath(); ctx.arc(0,-2,6,Math.PI,0); ctx.fill();
-ctx.fillStyle='#886600'; ctx.beginPath(); ctx.arc(0,6,2.5,0,Math.PI*2); ctx.fill();
-} else if (specialFood.type === 'shrink') {
-roundRect(ctx,-5,-8,10,16,3); ctx.fillStyle='#9b5de5'; ctx.fill();
-roundRect(ctx,-4,-6,8,12,2); ctx.fillStyle='#d0a0ff'; ctx.fill();
-ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(2,-3,1.5,0,Math.PI*2); ctx.fill();
-}
+ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+let sfEmoji = '💰';
+if (specialFood.type === 'speed') sfEmoji = '⚡';
+else if (specialFood.type === 'shield') sfEmoji = '🛡️';
+else if (specialFood.type === 'shrink') sfEmoji = '🧪';
+ctx.font = Math.floor(GRID * 1.4) + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+ctx.fillText(sfEmoji, 0, 0);
 ctx.restore();
 }
 const ghostColor = getGhostColor();
@@ -775,6 +772,28 @@ else if (currentSkinId === 'yang') { if (!drawImageHelper(SHEEP_ASSETS.tail,cx,c
 else { const hue = skin.bodyHue; const t = i/Math.max(snake.length-1,1); ctx.fillStyle = `rgb(${Math.floor(hue.r+t*40)},${Math.floor(hue.g-t*60)},${Math.floor(hue.b-t*40)})`; const inset = 2.5+t*1.8; roundRect(ctx,x+inset,y+inset,GRID-inset*2,GRID-inset*2,5.5); ctx.fill(); }
 }
 });
+// ===== 护盾光环 =====
+if (shieldActive && snake.length > 0) {
+const hx = snake[0].x * GRID + GRID/2;
+const hy = snake[0].y * GRID + GRID/2;
+const shieldPulse = 0.85 + Math.sin(foodPulse * 2.5) * 0.15;
+const shieldRadius = GRID * 1.1 * shieldPulse;
+ctx.save();
+ctx.globalAlpha = 0.75;
+const shGlow = ctx.createRadialGradient(hx, hy, GRID * 0.3, hx, hy, shieldRadius * 1.7);
+shGlow.addColorStop(0, 'rgba(0, 255, 200, 0.55)');
+shGlow.addColorStop(0.6, 'rgba(0, 200, 255, 0.25)');
+shGlow.addColorStop(1, 'rgba(0, 200, 255, 0)');
+ctx.fillStyle = shGlow;
+ctx.beginPath(); ctx.arc(hx, hy, shieldRadius * 1.7, 0, Math.PI * 2); ctx.fill();
+ctx.strokeStyle = 'rgba(100, 255, 220, 0.95)';
+ctx.lineWidth = 2.5;
+ctx.beginPath(); ctx.arc(hx, hy, shieldRadius, 0, Math.PI * 2); ctx.stroke();
+ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+ctx.lineWidth = 1.3;
+ctx.beginPath(); ctx.arc(hx, hy, shieldRadius * 0.78, 0, Math.PI * 2); ctx.stroke();
+ctx.restore();
+}
 particles.forEach(p => { ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill(); });
 ctx.globalAlpha = 1;
 ctx.restore();
@@ -802,7 +821,7 @@ let ateSomething = false;
 if (head.x === food.x && head.y === food.y) {
 ateSomething = true;
 foodsEaten++;
-vibrate([80,40,80]); shakeAmount = 18;
+vibrate([100, 40, 100]); shakeAmount = 18;
 let baseScore = 10;
 if (buffSpeedTimer > 0) baseScore *= 2;
 score += baseScore;
@@ -862,7 +881,7 @@ function tick() { update(); updateParticles(); draw(); }
 function gameOver(reason) {
 if (isGameOver) return;
 isGameOver = true; isDying = true;
-vibrate([400,150,400,150,400]); shakeAmount = 35;
+vibrate([500, 150, 500, 150, 500]); shakeAmount = 35;
 totalScoreAccum += score; saveAchievements(); checkAchievements();
 snake.forEach((s,i) => { if (i%2===0) spawnParticles(s.x, s.y, '#00f5d4'); });
 setTimeout(() => {
@@ -884,6 +903,20 @@ if (isPaused) { stopLoop(); playBgm('menu'); overlayTitle.textContent='暂时闭
 else { overlay.classList.add('hidden'); startBtn.style.display='block'; updateGameBgm(); startLoop(); }
 }
 function setDirection(dir) { if (isPaused || isGameOver) return; if (dir==='up' && direction.y===0) nextDirection={x:0,y:-1}; else if (dir==='down' && direction.y===0) nextDirection={x:0,y:1}; else if (dir==='left' && direction.x===0) nextDirection={x:-1,y:0}; else if (dir==='right' && direction.x===0) nextDirection={x:1,y:0}; }
+
+// ===== 手机端作弊：连点标题 5 次解锁全部 =====
+let titleTapCount = 0;
+let titleTapTimer = null;
+document.querySelector('h1').addEventListener('click', () => {
+    titleTapCount++;
+    clearTimeout(titleTapTimer);
+    if (titleTapCount >= 5) {
+        titleTapCount = 0;
+        cheatUnlockAll();
+        return;
+    }
+    titleTapTimer = setTimeout(() => { titleTapCount = 0; }, 2000);
+});
 
 let cheatBuffer = '';
 document.addEventListener('keydown', (e) => {
@@ -969,14 +1002,13 @@ catTrail = [];
 }
 });
 updateCatModeBtn();
-
 // ===== 指南弹窗数据与逻辑 =====
 const GUIDE_DATA = [
 { id: 'basic', icon: '🎮', title: '基础操作', content: `<h4>🎮 基础操作</h4><p>使用键盘或屏幕虚拟按键控制蛇的方向。</p><ul><li>电脑端：<kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> 或 <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></li><li>手机端：点击屏幕下方方向键</li><li>暂停/继续：按 <kbd>空格</kbd> 或点击暂停按钮</li></ul><p>蛇不能掉头，也不能撞墙或咬到自己。</p>` },
 { id: 'food', icon: '🍎', title: '食物与积分', content: `<h4>🍎 普通食物</h4><p>吃掉普通食物 <span class="hl2">+10 积分</span>，身体变长一节，移动速度随分数增加而加快。</p><h4>⭐ 特殊食物（独立刷新）</h4><p>普通食物和特殊食物是<span class="hl">独立存在</span>的，可以同时出现在棋盘上。特殊食物存在时间约 8 秒，超时会消失，需抓紧时间吃。</p><div class="card"><div class="title">💰 金元宝</div><div class="desc">吃掉后直接获得 <span class="hl3">20 积分</span>（双倍）。</div></div><div class="card"><div class="title">⚡ 加速药水</div><div class="desc">吃到后蛇会短暂加速，持续 <span class="hl3">5 秒</span>，期间分数翻倍。</div></div><div class="card"><div class="title">🛡️ 护盾铃铛</div><div class="desc">获得一次免死金牌，撞墙或撞自己可以免疫一次死亡。</div></div><div class="card"><div class="title">🧪 缩小药水</div><div class="desc">蛇身长度减少一半，但分数不变，适合新手救场。</div></div>` },
-{ id: 'cat', icon: '🐱', title: '猫鼠大战', content: `<h4>🐱 猫鼠大战</h4><p>当单局分数达到 <span class="hl">250 分</span> 后，棋盘上会出现一只野猫，并且猫鼠大战按钮开启时才会出现。</p><div class="card"><div class="title">🐾 猫的追踪</div><div class="desc">猫会朝着蛇头的方向移动，每两步移动一次，速度比蛇稍慢。</div></div><div class="card"><div class="title">✂️ 猫咬尾巴</div><div class="desc">如果猫碰到蛇尾（从第 4 节开始算），尾巴会被咬断，失去被咬位置之后的所有身体。累计被咬 <span class="hl3">20 节</span> 后游戏失败。</div></div><div class="card"><div class="title">🏆 围死野猫</div><div class="desc">如果你用蛇身把猫围住，让它上下左右都无法移动到边界（没有缺口），猫就会被困死，你获得 <span class="hl3">+50 分</span> 奖励！无论围住的空间多小或多大，只要没有缺口就算围死。</div></div><div class="card"><div class="title">🛡️ 护盾抵挡</div><div class="desc">如果身上有护盾，猫碰到蛇头时护盾会抵挡一次，猫会消失。</div></div>` },
+{ id: 'cat', icon: '🐱', title: '猫鼠大战', content: `<h4>🐱 猫鼠大战</h4><p>当单局分数达到 <span class="hl">250 分</span> 后，棋盘上会出现一只野猫，并且猫鼠大战按钮开启时才会出现。</p><div class="card"><div class="title">🐾 猫的追踪</div><div class="desc">猫会朝着蛇头的方向移动，每两步移动一次，速度比蛇稍慢。</div></div><div class="card"><div class="title">💀 猫碰蛇头</div><div class="desc">如果猫正面碰到蛇头，游戏<span class="hl">立即失败</span>！一定要小心走位。</div></div><div class="card"><div class="title">✂️ 猫咬尾巴</div><div class="desc">如果猫碰到蛇尾（从第 4 节开始算），尾巴会被咬断，失去被咬位置之后的所有身体。累计被咬 <span class="hl3">20 节</span> 后游戏失败。</div></div><div class="card"><div class="title">🏆 围死野猫</div><div class="desc">如果你用蛇身把猫围住，让它上下左右都无法移动到边界（没有缺口），猫就会被困死，你获得 <span class="hl3">+50 分</span> 奖励！无论围住的空间多小或多大，只要没有缺口就算围死。</div></div><div class="card"><div class="title">🛡️ 护盾抵挡</div><div class="desc">如果身上有护盾，猫碰到蛇头时护盾会抵挡一次，猫会消失。</div></div>` },
 { id: 'skin', icon: '🎨', title: '皮肤与成就', content: `<h4>🎨 皮肤系统</h4><p>通过达成特定成就，可以解锁十二生肖皮肤。点击顶部“皮肤”按钮查看已解锁的皮肤。</p><ul><li>鼠：积分达到 30</li><li>牛：积分达到 70</li><li>虎：积分达到 130</li><li>兔：积分达到 200</li><li>龙：积分达到 300</li><li>蛇：体长达到 12</li><li>马：积分达到 450</li><li>羊：积分达到 600</li><li>猴：单局吃掉 20 个食物</li><li>鸡：体长达到 18</li><li>狗：积分达到 900</li><li>猪：积分达到 1300</li></ul><h4>🏆 成就系统</h4><p>点击顶部“成就”按钮查看所有成就及进度。解锁成就会有弹窗提示。</p>` },
-{ id: 'tips', icon: '💡', title: '小技巧', content: `<h4>💡 高手小技巧</h4><ul><li><span class="hl2">善用护盾</span>：留一个护盾在身上，被猫正面追上时可以救命。</li><li><span class="hl2">围猫战术</span>：利用蛇身长的优势，绕一个大圈把猫围住，能拿 50 分，还能解除猫的威胁。</li><li><span class="hl2">加速时机</span>：加速药水期间分数翻倍，尽量在这 5 秒内多吃几个食物。</li><li><span class="hl2">缩小药水</span>：如果蛇身太长快撞到自己了，吃缩小药水可以直接减半，保命好用。</li><li><span class="hl3">尾流特效</span>：蛇身后的彩色尾流会随着分数变化颜色，分数越高颜色越红紫，也越粗。</li></ul>` }
+{ id: 'tips', icon: '💡', title: '小技巧', content: `<h4>💡 高手小技巧</h4><ul><li><span class="hl2">善用护盾</span>：留一个护盾在身上，被猫正面追上时可以救命。</li><li><span class="hl2">围猫战术</span>：利用蛇身长的优势，绕一个大圈把猫围住，能拿 50 分，还能解除猫的威胁。</li><li><span class="hl2">加速时机</span>：加速药水期间分数翻倍，尽量在这 5 秒内多吃几个食物。</li><li><span class="hl2">缩小药水</span>：如果蛇身太长快撞到自己了，吃缩小药水可以直接减半，保命好用。</li><li><span class="hl3">尾流特效</span>：蛇身后的彩色尾流会随着分数变化颜色，分数越高颜色越红紫，也越粗。</li><li><span class="hl3">手机作弊</span>：2 秒内连点标题“🐍 十二生肖闯江湖”5 次，解锁全部皮肤 + 成就！</li></ul>` }
 ];
 let currentGuideKey = 'basic';
 function renderGuideNav() {
