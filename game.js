@@ -90,6 +90,11 @@ function updateGameBgm() { if (musicEnabled && !isGameOver && !isPaused) playBgm
 let unlocked = JSON.parse(localStorage.getItem(ACHIEVE_KEY) || '[]');
 highScore = parseInt(localStorage.getItem(HIGH_KEY) || '0');
 let totalScoreAccum = parseInt(localStorage.getItem(TOTAL_KEY) || '0');
+let maxLengthReached = 3;
+let foodsEaten = 0;
+let survivalTime = 0;
+let fastEats = 0;
+let cornerEaten = new Set();
 highScoreEl.textContent = highScore;
 function saveAchievements() { localStorage.setItem(ACHIEVE_KEY, JSON.stringify(unlocked)); localStorage.setItem(TOTAL_KEY, totalScoreAccum); }
 
@@ -521,6 +526,15 @@ p.ghostTrail.push(snake.map(s => ({x:s.x, y:s.y})));
 if (p.ghostTrail.length > 22) p.ghostTrail.shift();
 }
 
+// ===== 成就系统变量同步 =====
+if (snakes[0]) {
+snakes[0].survivalTime = (snakes[0].survivalTime || 0) + speed / 1000;
+maxLengthReached = snakes[0].maxLen;
+foodsEaten = snakes[0].foodsEaten;
+fastEats = snakes[0].fastEats;
+cornerEaten = snakes[0].cornerEaten;
+survivalTime = Math.floor(snakes[0].survivalTime);
+}  
 // 猫的更新
 updateCat();
 
