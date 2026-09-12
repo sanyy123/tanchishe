@@ -81,15 +81,13 @@ const WIN_SCORE = 300;
 // ★ 棋盘皮肤（全局）+ 双人选择缓存
 let boardSkinId = localStorage.getItem('snakeBoardSkin') || localStorage.getItem('snakeCurrentSkin') || 'default';
 if (!SKINS[boardSkinId]) boardSkinId = 'default';
-let currentSkinId = boardSkinId; // 兼容旧代码
-// 双人选择：P1、P2 各自的蛇皮肤
+let currentSkinId = boardSkinId;
 let p1SkinId = 'default';
 let p2SkinId = 'default';
-// 弹窗缓存
 let dualSelectedBoardId = boardSkinId;
 let dualSelectedP1 = 'default';
 let dualSelectedP2 = 'default';
-let dualPage = 'board'; // 'board' | 'snake'
+let dualPage = 'board';
 
 let snake = null, direction = {x:1,y:0}, nextDirection = {x:1,y:0};
 let currentPlayer = null;
@@ -121,6 +119,7 @@ function saveAchievements() { localStorage.setItem(ACHIEVE_KEY, JSON.stringify(u
 const BASE_SPEED = 160, MIN_SPEED = 70;
 function calcSpeed() { const step = Math.floor(score/50); return Math.max(MIN_SPEED, BASE_SPEED - step*6); }
 function vibrate(pattern) { if (!navigator.vibrate) return; try { navigator.vibrate(pattern); } catch(e) {} }
+
 // ===== 吃食物音效（MP3 版本） =====
 const eatSound1 = new Audio('./eat1.mp3');
 eatSound1.preload = 'auto';
@@ -132,10 +131,8 @@ eatSound2.volume = 0.5;
 function playEatSound(playerId, isSpecial) {
 try {
 const base = isSpecial ? eatSound2 : eatSound1;
-// 用 cloneNode 让连续吃食物时可以叠加播放
 const snd = base.cloneNode();
 snd.volume = base.volume;
-// P2 音调稍微高一点，方便区分
 snd.playbackRate = playerId === 'p2' ? 1.15 : 1.0;
 const p = snd.play();
 if (p) p.catch(() => {});
@@ -151,7 +148,6 @@ ctx.drawImage(img, cx - w/2, cy - h/2, w, h);
 return true;
 }
 function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
-// 判断皮肤是否有独立贴图（暖色系）
 function isWarmSkin(skinId) { return ['shu','niu','hu','tu','long','she','ma','yang'].includes(skinId); }
 
 function createPlayer(id, headColors, bodyHue, startX, startY, startDir, skinId) {
@@ -239,10 +235,10 @@ while (!valid && attempts < 200) {
 attempts++;
 sf = { x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS), type:'gold' };
 const r = Math.random();
-if (r < 0.30) sf.type = 'gold';        // 30%
-else if (r < 0.55) sf.type = 'speed';   // 25%
-else if (r < 0.85) sf.type = 'shield';  // 30%
-else sf.type = 'shrink';                 // 15%
+if (r < 0.30) sf.type = 'gold';
+else if (r < 0.55) sf.type = 'speed';
+else if (r < 0.85) sf.type = 'shield';
+else sf.type = 'shrink';
 valid = !snakes.some(p => p.body && p.body.some(s => s.x === sf.x && s.y === sf.y));
 if (valid && food) valid = !(food.x === sf.x && food.y === sf.y);
 if (valid && obstacles.some(o => o.x === sf.x && o.y === sf.y)) valid = false;
@@ -419,7 +415,6 @@ overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && 
 startBtn.textContent = '再次入世';
 overlay.classList.remove('hidden');
 playBgm('menu');
-// ★ 触发 AI 评语
 setTimeout(() => {
 const el = document.getElementById('aiComment');
 if (el && typeof generateAIComment === 'function') {
@@ -586,7 +581,6 @@ ctx.save();
 let shakeX=0, shakeY=0;
 if (shakeAmount > 0.1) { shakeX = (Math.random()-0.5)*shakeAmount; shakeY = (Math.random()-0.5)*shakeAmount; shakeAmount *= 0.90; } else { shakeAmount = 0; }
 ctx.translate(shakeX, shakeY);
-// ★ 棋盘皮肤用 boardSkinId
 const boardSkin = SKINS[boardSkinId] || SKINS.default;
 if (isWarmSkin(boardSkinId)) {
 drawWarmBoard(boardSkinId);
@@ -757,7 +751,7 @@ ctx.beginPath(); ctx.moveTo(-5,-1); ctx.lineTo(5,-1); ctx.lineTo(5,9); ctx.quadr
 ctx.restore();
 }
 
-// ★★★ 关键：drawPlayer 用 p.skinId 绘制 ★★★
+// ★★★ 绘制玩家：鼠头鼠身牛身已还原 ★★★
 function drawPlayer(p, idx) {
 if (!p || !p.body || p.body.length === 0) return;
 const pSkinId = p.skinId || 'default';
@@ -792,16 +786,24 @@ const x = seg.x*GRID, y = seg.y*GRID, isHead = i===0;
 const cx = x+GRID/2, cy = y+GRID/2;
 if (isHead) {
 if (pSkinId === 'shu') {
+// 耳朵
 ctx.fillStyle='#e8c9a0'; ctx.beginPath(); ctx.ellipse(cx-9,cy-8,7,8,-0.3,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx+9,cy-8,7,8,0.3,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#f5d5b5'; ctx.beginPath(); ctx.ellipse(cx-9,cy-8,4,5,-0.3,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx+9,cy-8,4,5,0.3,0,Math.PI*2); ctx.fill();
+// 头部
 const hg = ctx.createRadialGradient(cx-3,cy-3,2,cx,cy,12); hg.addColorStop(0,'#f0e0c8'); hg.addColorStop(1,'#d4b896');
 ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(cx,cy,11,0,Math.PI*2); ctx.fill();
+// 腮红
+ctx.fillStyle='rgba(255,160,140,0.45)'; ctx.beginPath(); ctx.ellipse(cx-7,cy+3,3.5,2.5,0,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx+7,cy+3,3.5,2.5,0,0,Math.PI*2); ctx.fill();
+// 眼睛
 ctx.fillStyle='#4a3020'; ctx.beginPath(); ctx.arc(cx-4,cy-1,2.8,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx+4,cy-1,2.8,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(cx-3.2,cy-1.8,1.1,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx+4.8,cy-1.8,1.1,0,Math.PI*2); ctx.fill();
+// 鼻子
 ctx.fillStyle='#e89a8a'; ctx.beginPath(); ctx.ellipse(cx,cy+4,2.2,1.6,0,0,Math.PI*2); ctx.fill();
+// 胡须
+ctx.strokeStyle='rgba(80,50,30,0.55)'; ctx.lineWidth=1.1; ctx.beginPath(); ctx.moveTo(cx-3,cy+3); ctx.lineTo(cx-12,cy+1); ctx.moveTo(cx-3,cy+5); ctx.lineTo(cx-11,cy+6); ctx.moveTo(cx+3,cy+3); ctx.lineTo(cx+12,cy+1); ctx.moveTo(cx+3,cy+5); ctx.lineTo(cx+11,cy+6); ctx.stroke();
 } else if (pSkinId === 'niu') {
 const STROKE='#6b3f22'; ctx.lineJoin='round';
-const drawHorn = (dir) => { ctx.beginPath(); ctx.moveTo(cx+dir*3.6,cy-9.5); ctx.bezierCurveTo(cx+dir*6.2,cy-15.5,cx+dir*9.2,cy-17.6,cx+dir*11.4,cy-18.2); ctx.bezierCurveTo(cx+dir*13.4,cy-14.5,cx+dir*10.8,cy-10,cx+dir*8.0,cy-7); ctx.closePath(); const hg=ctx.createLinearGradient(cx+dir*4,cy-15,cx+dir*12,cy-9); hg.addColorStop(0,'#fbe49e'); hg.addColorStop(1,'#f1bf4c'); ctx.fillStyle=hg; ctx.fill(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.3; ctx.stroke(); };
+const drawHorn = (dir) => { ctx.beginPath(); ctx.moveTo(cx+dir*3.6,cy-9.5); ctx.bezierCurveTo(cx+dir*6.2,cy-15.5,cx+dir*9.2,cy-17.6,cx+dir*11.4,cy-18.2); ctx.bezierCurveTo(cx+dir*13.4,cy-14.5,cx+dir*10.8,cy-10,cx+dir*8.0,cy-7); ctx.closePath(); const hg=ctx.createLinearGradient(cx+dir*4,cy-15,cx+dir*12,cy-9); hg.addColorStop(0,'#fbe49e'); hg.addColorStop(1,'#f1bf4c'); ctx.fillStyle=hg; ctx.fill(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.3; ctx.stroke(); ctx.beginPath(); ctx.moveTo(cx+dir*5.6,cy-10.8); ctx.quadraticCurveTo(cx+dir*8.4,cy-12.6,cx+dir*9.8,cy-15.6); ctx.strokeStyle='rgba(122,74,34,0.45)'; ctx.lineWidth=0.9; ctx.stroke(); };
 drawHorn(-1); drawHorn(1);
 [[-1,-0.35],[1,0.35]].forEach(([dir,rot]) => { ctx.beginPath(); ctx.ellipse(cx+dir*11.6,cy-1.0,5.3,4.9,rot,0,Math.PI*2); ctx.fillStyle='#fff6e6'; ctx.fill(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.4; ctx.stroke(); ctx.beginPath(); ctx.ellipse(cx+dir*12.4,cy-0.2,3.0,2.3,rot,0,Math.PI*2); ctx.fillStyle='#ff9eb5'; ctx.fill(); });
 const facePath = () => { ctx.beginPath(); ctx.ellipse(cx,cy+1.5,11.5,11,0,0,Math.PI*2); };
@@ -819,15 +821,30 @@ else if (pSkinId === 'ma') { ctx.save(); ctx.translate(cx,cy); if (direction.x==
 else if (pSkinId === 'yang') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(SHEEP_ASSETS.head,0,0,GRID*2.0)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
 else { const headGlow = ctx.createRadialGradient(cx,cy,2,cx,cy,GRID*1.1); const glowCol = p.id === 'p2' ? 'rgba(241,91,181,' : 'rgba(0,245,212,'; headGlow.addColorStop(0, glowCol + '0.4)'); headGlow.addColorStop(1, glowCol + '0)'); ctx.fillStyle=headGlow; ctx.fillRect(x-5,y-5,GRID+10,GRID+10); const headGrad = ctx.createLinearGradient(x,y,x+GRID,y+GRID); headGrad.addColorStop(0, headColors[0]); headGrad.addColorStop(0.5, headColors[1]); headGrad.addColorStop(1, headColors[2]); ctx.fillStyle=headGrad; roundRect(ctx,x+1.5,y+1.5,GRID-3,GRID-3,7); ctx.fill(); }
 } else {
-if (pSkinId === 'niu') {
-const scx=x+GRID/2, scy=y+GRID/2; let angle = -Math.PI/2;
+if (pSkinId === 'shu') {
+// 老鼠身体：完整版（圆身 + 耳朵 + 眼睛 + 腮红）
+const scx=x+GRID/2, scy=y+GRID/2;
+ctx.fillStyle='#f0e0c8'; ctx.beginPath(); ctx.arc(scx,scy,8.5,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='#e8c9a0'; ctx.beginPath(); ctx.ellipse(scx-6,scy-5,3.5,4,-0.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(scx+6,scy-5,3.5,4,0.2,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='#5a4030'; ctx.beginPath(); ctx.arc(scx-3,scy-1,1.6,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(scx+3,scy-1,1.6,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(scx-2.5,scy-1.5,0.6,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(scx+3.5,scy-1.5,0.6,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='#e89a8a'; ctx.beginPath(); ctx.arc(scx,scy+2.5,1.3,0,Math.PI*2); ctx.fill();
+} else if (pSkinId === 'niu') {
+// 牛身体：完整奶瓶（瓶身 + 奶嘴盖 + 奶嘴头 + 奶液渐变）
+const scx=x+GRID/2, scy=y+GRID/2;
+let angle = -Math.PI/2;
 if (i>0 && p.body[i-1]) { const prev = p.body[i-1]; angle = Math.atan2(prev.y-seg.y, prev.x-seg.x); }
 ctx.save(); ctx.translate(scx,scy); ctx.rotate(angle+Math.PI/2);
 const STROKE='#7a4a24'; ctx.lineJoin='round';
 const bodyPath = () => { ctx.beginPath(); ctx.moveTo(-6.4,-2); ctx.lineTo(-6.4,6); ctx.quadraticCurveTo(-6.4,10.4,-2,10.4); ctx.lineTo(2,10.4); ctx.quadraticCurveTo(6.4,10.4,6.4,6); ctx.lineTo(6.4,-2); ctx.closePath(); };
-ctx.fillStyle='#fffdf5'; ctx.strokeStyle='#fffdf5'; ctx.lineWidth=3.2; bodyPath(); ctx.fill(); ctx.stroke();
+const capPath = () => { ctx.beginPath(); ctx.moveTo(-5.4,-6.4); ctx.lineTo(-5.4,-2.4); ctx.lineTo(5.4,-2.4); ctx.lineTo(5.4,-6.4); ctx.quadraticCurveTo(0,-8.2,-5.4,-6.4); ctx.closePath(); };
+const nipplePath = () => { ctx.beginPath(); ctx.moveTo(-2.5,-6.2); ctx.quadraticCurveTo(-2.3,-10.4,0,-11); ctx.quadraticCurveTo(2.3,-10.4,2.5,-6.2); ctx.closePath(); };
+ctx.fillStyle='#fffdf5'; ctx.strokeStyle='#fffdf5'; ctx.lineWidth=3.2; bodyPath(); ctx.fill(); ctx.stroke(); capPath(); ctx.fill(); ctx.stroke(); nipplePath(); ctx.fill(); ctx.stroke();
 bodyPath(); ctx.fillStyle='#ffffff'; ctx.fill();
+ctx.save(); bodyPath(); ctx.clip(); const milkG=ctx.createLinearGradient(0,0,0,11); milkG.addColorStop(0,'#fffdf6'); milkG.addColorStop(1,'#ffeed2'); ctx.fillStyle=milkG; ctx.fillRect(-7,0.5,14,11); ctx.restore();
 bodyPath(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.2; ctx.stroke();
+const capG=ctx.createLinearGradient(0,-7,0,-2); capG.addColorStop(0,'#fbe49e'); capG.addColorStop(1,'#efbb46'); capPath(); ctx.fillStyle=capG; ctx.fill(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.2; ctx.stroke();
+nipplePath(); ctx.fillStyle='#ffe0b0'; ctx.fill(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.15; ctx.stroke();
 ctx.restore();
 } else if (pSkinId === 'hu') { if (!drawImageHelper(TIGER_ASSETS.body,cx,cy,GRID*1.8)) { ctx.fillStyle='#f5b06c'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
 else if (pSkinId === 'tu') { if (!drawImageHelper(RABBIT_ASSETS.body,cx,cy,GRID*1.9)) { ctx.fillStyle='#ffe4e8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
@@ -835,10 +852,7 @@ else if (pSkinId === 'long') { const head = p.body[0]; if (!head) return; const 
 else if (pSkinId === 'she') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h); if (Math.abs(a2h)>Math.PI/2) ctx.scale(1,-1); if (!drawImageHelper(SNAKE_ASSETS.tail,0,0,GRID*1.2)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
 else if (pSkinId === 'ma') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper(HORSE_ASSETS.tail,0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
 else if (pSkinId === 'yang') { if (!drawImageHelper(SHEEP_ASSETS.tail,cx,cy,GRID*1.9)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (pSkinId === 'shu') {
-const scx=x+GRID/2, scy=y+GRID/2;
-ctx.fillStyle='#f0e0c8'; ctx.beginPath(); ctx.arc(scx,scy,8.5,0,Math.PI*2); ctx.fill();
-} else {
+else {
 const hue = p.bodyHue;
 const t = i/Math.max(p.body.length-1,1);
 ctx.fillStyle = 'rgb('+Math.floor(hue.r+t*40)+','+Math.floor(hue.g-t*60)+','+Math.floor(hue.b-t*40)+')';
