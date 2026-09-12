@@ -121,6 +121,26 @@ function saveAchievements() { localStorage.setItem(ACHIEVE_KEY, JSON.stringify(u
 const BASE_SPEED = 160, MIN_SPEED = 70;
 function calcSpeed() { const step = Math.floor(score/50); return Math.max(MIN_SPEED, BASE_SPEED - step*6); }
 function vibrate(pattern) { if (!navigator.vibrate) return; try { navigator.vibrate(pattern); } catch(e) {} }
+// ===== 吃食物音效（MP3 版本） =====
+const eatSound1 = new Audio('./eat1.mp3');
+eatSound1.preload = 'auto';
+eatSound1.volume = 0.5;
+const eatSound2 = new Audio('./eat2.mp3');
+eatSound2.preload = 'auto';
+eatSound2.volume = 0.5;
+
+function playEatSound(playerId, isSpecial) {
+try {
+const base = isSpecial ? eatSound2 : eatSound1;
+// 用 cloneNode 让连续吃食物时可以叠加播放
+const snd = base.cloneNode();
+snd.volume = base.volume;
+// P2 音调稍微高一点，方便区分
+snd.playbackRate = playerId === 'p2' ? 1.15 : 1.0;
+const p = snd.play();
+if (p) p.catch(() => {});
+} catch (e) {}
+}
 document.addEventListener('touchstart', () => { try { if (navigator.vibrate) navigator.vibrate(1); } catch(e) {} }, { once: true });
 
 function drawImageHelper(img, cx, cy, dpx) {
@@ -219,10 +239,10 @@ while (!valid && attempts < 200) {
 attempts++;
 sf = { x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS), type:'gold' };
 const r = Math.random();
-if (r < 0.25) sf.type = 'gold';
-else if (r < 0.5) sf.type = 'speed';
-else if (r < 0.75) sf.type = 'shield';
-else sf.type = 'shrink';
+if (r < 0.30) sf.type = 'gold';        // 30%
+else if (r < 0.55) sf.type = 'speed';   // 25%
+else if (r < 0.85) sf.type = 'shield';  // 30%
+else sf.type = 'shrink';                 // 15%
 valid = !snakes.some(p => p.body && p.body.some(s => s.x === sf.x && s.y === sf.y));
 if (valid && food) valid = !(food.x === sf.x && food.y === sf.y);
 if (valid && obstacles.some(o => o.x === sf.x && o.y === sf.y)) valid = false;
@@ -475,6 +495,7 @@ let ateSomething = false;
 if (head.x === food.x && head.y === food.y) {
 ateSomething = true; p.foodsEaten++;
 vibrate([100,40,100]); shakeAmount = 18;
+playEatSound(p.id, false);
 let baseScore = 10;
 if (p.speedBoost > 0) baseScore *= 2;
 p.score += baseScore;
@@ -496,6 +517,7 @@ lengthEl.textContent = p.body.length;
 } else if (specialFood && head.x === specialFood.x && head.y === specialFood.y) {
 ateSomething = true; p.foodsEaten++;
 vibrate([100,50,100]); shakeAmount = 22;
+playEatSound(p.id, true);
 let baseScore = 10;
 if (p.speedBoost > 0) baseScore *= 2;
 if (specialFood.type === 'gold') { baseScore = 20; showCheatToast('💰 金元宝！积分双倍！'); }

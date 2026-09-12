@@ -40,8 +40,39 @@ showCheatToast('✨ 1314 作弊成功 · 全部皮肤 + 成就已解锁！');
 // ==================== ★ AI 评语配置（智谱 + 代理） ★ ====================
 const AI_API_KEY  = '691e8784c6954ae9be22fe6a49bba291.FNecmlca4jQOQoH6'; // ★ 替换为你第一步拿到的 Key
 const AI_BASE_URL = 'https://zhipu.wange5232.workers.dev/v4'; // ★ 替换为你的 Worker 地址，注意末尾要加上 /v4 
-const AI_MODEL    = 'glm-4-flash'; // 免费的快速模型
-/**
+const AI_MODEL    = 'glm-4-flash';
+
+// ★ 人设：小江湖，江湖客栈的老板娘
+const AI_SYSTEM_PROMPT = [
+'你是"小江湖"，是十二生肖闯江湖客栈的老板娘，性格古灵精怪、说话带江湖气。',
+'',
+'【身份设定】',
+'- 你开着一家叫"江湖客栈"的酒馆，玩家是你的老熟客。',
+'- 你爱叫他/她"宝宝"，语气亲切，但不会谄媚。',
+'- 你会用武侠梗，比如"内力深厚"、"走位如风"、"差点走火入魔"、"江湖上又要传开了"。',
+'',
+'【点评规则 - 必须严格遵守】',
+'1. 每次点评必须严格基于本次玩家数据（积分、体长、吃掉食物数），结合数据给出针对性的一句话。',
+'2. 禁止使用之前用过的点评角度、句式或梗，每次都要换一个切入点。',
+'3. 每次点评的语气必须按照【本次语气要求】来，不能自己乱换。',
+'4. 如果系统提供了【最近几次评语】，必须避开那些表达方式，不许和它们相似。',
+'5. 评语不超过30字，直接输出评语，不加引号、不加前缀、不加表情符号。'
+].join('\n');
+
+// ★ 语气池：每次随机挑一个
+const TONE_POOL = [
+{ id: '傲娇',   desc: '嘴上嫌弃，其实是在夸；用"哼"、"才不是"、"勉强"等词。' },
+{ id: '毒舌',   desc: '犀利吐槽但不伤人；用夸张对比、反话正说。' },
+{ id: '装傻',   desc: '假装看不懂，瞎猜玩家在干什么；用"咦"、"难道"、"所以是"。' },
+{ id: '江湖',   desc: '武侠旁白腔；用"此子"、"果然"、"不出所料"、"江湖传闻"。' },
+{ id: '吃货',   desc: '一切从吃的角度点评；用食物作比喻。' },
+{ id: '惊叹',   desc: '夸张惊讶；用"天呐"、"不可能"、"绝了"、"这谁敢信"。' },
+{ id: '温柔',   desc: '像大姐姐一样温柔鼓励；用"没关系"、"慢慢来"、"进步了"。' },
+{ id: '腹黑',   desc: '表面夸奖，暗地埋梗；用"呵呵"、"果然如此"、"我早说过"。' }
+];
+
+// ★ 最近评语历史（内存里保留最近 5 条）
+let recentComments = [];/**
  * 流式生成 AI 评语，逐字显示到 targetEl
  */
 async function generateAIComment(prompt, targetEl) {
@@ -62,8 +93,10 @@ headers: {
 },
 body: JSON.stringify({
 model: AI_MODEL,
-messages: [{ role: 'user', content: prompt }],
-stream: true,
+messages: [
+{ role: 'system', content: AI_SYSTEM_PROMPT },
+{ role: 'user', content: prompt }
+],stream: true,
 temperature: 0.9,
 max_tokens: 80
 })
@@ -99,10 +132,22 @@ if (delta) { fullText += delta; targetEl.textContent = fullText; }
 } catch (e) {}
 }
 }
-if (!fullText.trim()) targetEl.textContent = getFallbackComment();
+if (!fullText.trim()) {
+const fb = getFallbackComment();
+targetEl.textContent = fb;
+recentComments.push(fb);
+if (recentComments.length > 5) recentComments.shift();
+} else {
+// 记录 AI 生成的评语，用于下次避重复
+recentComments.push(fullText);
+if (recentComments.length > 5) recentComments.shift();
+}
 } catch (err) {
 console.warn('AI 评语失败:', err);
-targetEl.textContent = getFallbackComment();
+const fb = getFallbackComment();
+targetEl.textContent = fb;
+recentComments.push(fb);
+if (recentComments.length > 5) recentComments.shift();
 }
 }
 
@@ -124,9 +169,26 @@ const p = (snakes && snakes[0]) || {};
 const s = p.score || 0;
 const l = (p.body && p.body.length) || 3;
 const f = p.foodsEaten || 0;
-return '你是风趣幽默的游戏解说员。用一句话（不超过40字）给玩家一个专属评语，语气活泼有梗、带江湖气息。直接输出评语，不加引号、不加标点前缀。玩家数据：积分' + s + '，体长' + l + '，吃掉食物' + f + '个。';
+
+// 随机挑一个本次语气
+const tone = TONE_POOL[Math.floor(Math.random() * TONE_POOL.length)];
+// 把本次语气存起来，稍后展示 / 记录用
+window.__currentTone = tone.id;
+
+let prompt = '';
+prompt += '【本次玩家数据】积分 ' + s + '，体长 ' + l + '，吃掉食物 ' + f + ' 个。\n';
+prompt += '【本次语气要求】以"' + tone.id + '"的语气点评：' + tone.desc + '\n';
+
+if (recentComments.length > 0) {
+prompt += '【最近几次评语 - 必须避开，不许雷同】\n';
+recentComments.slice(-3).forEach((c, i) => { prompt += (i+1) + '. ' + c + '\n'; });
+prompt += '请用完全不同的角度、句式和梗，重新写一句评语。';
+} else {
+prompt += '请写一句评语。';
 }
 
+return prompt;
+}
 // ===== 皮肤解锁判断 =====
 function isSkinUnlocked(skin) { return !skin.unlockId || unlocked.includes(skin.unlockId) || cheatSkins.has(skin.unlockId); }
 
