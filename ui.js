@@ -41,7 +41,7 @@ showCheatToast('✨ 1314 作弊成功 · 全部皮肤 + 成就已解锁！');
 // ==================== ★ AI 评语配置（智谱 + 代理） ★ ====================
 const AI_API_KEY  = '691e8784c6954ae9be22fe6a49bba291.FNecmlca4jQOQoH6';
 const AI_BASE_URL = 'https://zhipu.wange5232.workers.dev/v4';
-const AI_MODEL    = 'glm-4-flash';
+const AI_MODEL    = 'GLM-4-Flash';
 
 const AI_SYSTEM_PROMPT = [
 '你是"小江湖"，是十二生肖闯江湖客栈的老板娘，性格古灵精怪、说话带江湖气。',
@@ -275,6 +275,56 @@ html += '<div class="stats-row"><span class="stats-label">🪨 撞到石头</spa
 html += '</div>';
 
 listEl.innerHTML = html;
+}
+
+// ===== 种子局 UI =====
+function openSeedSelect() {
+  renderSeedList();
+  const m = document.getElementById('seedModal');
+  if (m) m.classList.add('show');
+}
+function renderSeedList() {
+  const list = document.getElementById('seedList');
+  if (!list) return;
+  list.innerHTML = '';
+  SEED_LEVELS.forEach(level => {
+    const key = SEED_HIGH_KEY_PREFIX + level.id;
+    let best = 0;
+    try { best = parseInt(localStorage.getItem(key) || '0'); } catch(e) { best = 0; }
+    const card = document.createElement('div');
+    card.className = 'seed-card';
+    const tags = [];
+    if (level.hasObstacle) tags.push('<span class="tag tag-obs">🚧 障碍</span>');
+    if (level.hasCat) tags.push('<span class="tag tag-cat">🐱 猫</span>');
+    card.innerHTML =
+      '<div class="seed-num">' + level.id + '</div>' +
+      '<div class="seed-info">' +
+        '<div class="seed-name">' + level.emoji + ' ' + level.name + '</div>' +
+        '<div class="seed-tags">' + tags.join('') + '</div>' +
+        '<div class="seed-best">' + (best > 0 ? '最高分 <span class="best-score">' + best + '</span>' : '尚未挑战') + '</div>' +
+      '</div>' +
+      '<button class="seed-lb-icon" data-seed="' + level.id + '" title="查看本关排行榜">🏆</button>';
+    // 点卡片本身 → 开始游戏
+    card.addEventListener('click', (e) => {
+      if (e.target.classList.contains('seed-lb-icon')) return; // 点图标不进入游戏
+      const m = document.getElementById('seedModal');
+      if (m) m.classList.remove('show');
+      if (typeof window.__startSeedGame === 'function') {
+        window.__startSeedGame(level.id);
+      }
+    });
+    list.appendChild(card);
+  });
+  // 绑定每张卡片的 🏆 排行榜按钮
+  list.querySelectorAll('.seed-lb-icon').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const seedId = parseInt(btn.dataset.seed, 10);
+      const m = document.getElementById('seedModal');
+      if (m) m.classList.remove('show');
+      openLeaderboard(seedId);
+    });
+  });
 }
 
 // ===== 商城 UI =====
@@ -558,12 +608,14 @@ if (isMobileDevice) {
 }
 
 function updateModeButtons() {
-modeSingleBtn.classList.toggle('active', gameMode === 'single');
+modeSingleBtn.classList.toggle('active', gameMode === 'single' && currentSeedId === null);
 modeDoubleBtn.classList.toggle('active', gameMode === 'double');
 }
 modeSingleBtn.addEventListener('click', () => {
-if (gameMode === 'single') return;
+if (gameMode === 'single' && currentSeedId === null) return;
 gameMode = 'single';
+// ★ 清空种子模式
+if (typeof window.__clearSeedMode === 'function') window.__clearSeedMode();
 updateModeButtons();
 updateCatModeBtn();
 overlayTitle.textContent = '十二生肖闯江湖';
@@ -574,12 +626,48 @@ modeDoubleBtn.addEventListener('click', () => {
 if (gameMode === 'double') return;
 if (isMobileDevice) return;
 gameMode = 'double';
+if (typeof window.__clearSeedMode === 'function') window.__clearSeedMode();
 updateModeButtons();
 updateCatModeBtn();
 overlayTitle.textContent = '👥 双人对战';
 overlayMsg.textContent = 'P1 = WASD  ·  P2 = 方向键  ·  先到 300 分或对方先死获胜';
 startBtn.textContent = '开始对战';
 });
+// 🗺️ 迷宫模式入口（带跳转加载遮罩）
+const modeMazeBtn = document.getElementById('modeMaze');
+if (modeMazeBtn) {
+  modeMazeBtn.addEventListener('click', () => {
+    const el = document.getElementById('globalLoading');
+    const txt = document.getElementById('globalLoadingText');
+    const bar = document.getElementById('globalLoadingProgress');
+    if (el && txt && bar) {
+      txt.textContent = '🗺️ 正在进入迷宫...';
+      el.classList.remove('hidden');
+      bar.style.width = '0%';
+      requestAnimationFrame(() => {
+        bar.style.width = '60%';
+        setTimeout(() => { bar.style.width = '100%'; }, 250);
+      });
+      setTimeout(() => { window.location.href = 'maze.html'; }, 650);
+    } else {
+      window.location.href = 'maze.html';
+    }
+  });
+}
+// 🌱 种子局入口
+const modeSeedBtn = document.getElementById('modeSeed');
+if (modeSeedBtn) {
+  modeSeedBtn.addEventListener('click', () => {
+    openSeedSelect();
+  });
+}
+// 种子弹窗关闭
+const seedModalEl = document.getElementById('seedModal');
+if (seedModalEl) {
+  const closeSeedBtn = document.getElementById('closeSeed');
+  if (closeSeedBtn) closeSeedBtn.addEventListener('click', () => seedModalEl.classList.remove('show'));
+  seedModalEl.addEventListener('click', (e) => { if (e.target === seedModalEl) seedModalEl.classList.remove('show'); });
+}
 updateModeButtons();
 updateCatModeBtn();
 updateObsModeBtn();
@@ -864,3 +952,74 @@ img.src = ASSET_URLS[key];
 Object.values(BGM).forEach(url => { const pre = new Audio(); pre.preload = 'auto'; pre.src = url; });
 audio.src = BGM.menu;
 startLoadingScreen();
+// ==================== ★ 排行榜前端逻辑 ★ ====================
+const LEADERBOARD_API = 'https://zhipu.wange5232.workers.dev/leaderboard';
+
+let currentLbSeedId = null;
+
+// 打开排行榜弹窗
+function openLeaderboard(seedId) {
+  if (!seedId) return;
+  currentLbSeedId = seedId;
+  const modal = document.getElementById('leaderboardModal');
+  const content = document.getElementById('leaderboardContent');
+  const title = document.getElementById('leaderboardTitle');
+  
+  const seedInfo = SEED_LEVELS.find(s => s.id === seedId);
+  title.textContent = '🏆 ' + (seedInfo ? seedInfo.name : '种子局') + ' 排行榜';
+  
+  content.innerHTML = '<div class="leaderboard-loading">加载中...</div>';
+  modal.classList.add('show');
+  
+  fetchLeaderboard(seedId);
+}
+
+// 拉取数据并渲染
+async function fetchLeaderboard(seedId) {
+  const content = document.getElementById('leaderboardContent');
+  try {
+    const res = await fetch(LEADERBOARD_API + '/list?seedId=' + seedId + '&limit=20');
+    const data = await res.json();
+    
+    if (!data.leaderboard || data.leaderboard.length === 0) {
+      content.innerHTML = '<div class="leaderboard-empty">🏜️ 暂无记录，快来抢第一！</div>';
+      return;
+    }
+    
+    let html = '<div class="leaderboard-list">';
+    const myName = localStorage.getItem('snakePlayerName') || '';
+    
+    data.leaderboard.forEach(item => {
+      const medal = item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : '#' + item.rank;
+      const isMe = item.playerName === myName ? ' is-me' : '';
+      html += `<div class="leaderboard-row${isMe}">
+        <span class="lb-rank">${medal}</span>
+        <span class="lb-name">${item.playerName}</span>
+        <span class="lb-score">${item.score}</span>
+      </div>`;
+    });
+    html += '</div>';
+    content.innerHTML = html;
+  } catch (e) {
+    console.warn('排行榜拉取失败:', e);
+    content.innerHTML = '<div class="leaderboard-empty">📡 加载失败，请检查网络后重试</div>';
+  }
+}
+
+// 绑定排行榜弹窗事件
+document.addEventListener('DOMContentLoaded', () => {
+  const lbBtn = document.getElementById('openLeaderboardBtn');
+  const lbModal = document.getElementById('leaderboardModal');
+  const closeLbBtn = document.getElementById('closeLeaderboard');
+  
+  if (lbBtn) {
+    lbBtn.addEventListener('click', () => {
+      const seedModal = document.getElementById('seedModal');
+      if (seedModal) seedModal.classList.remove('show');
+      // 默认打开第一个种子局的排行榜，或者提示用户
+      openLeaderboard(1); 
+    });
+  }
+  if (closeLbBtn) closeLbBtn.addEventListener('click', () => lbModal.classList.remove('show'));
+  if (lbModal) lbModal.addEventListener('click', (e) => { if (e.target === lbModal) lbModal.classList.remove('show'); });
+});

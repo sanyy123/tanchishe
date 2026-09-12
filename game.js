@@ -56,6 +56,19 @@ let fastEats = 0;
 let cornerEaten = new Set();
 let totalScoreAccum = 0;
 
+// ===== 种子局系统 =====
+let currentSeedId = null;
+let gameRng = Math.random;
+
+function mulberry32(seed) {
+  return function() {
+    let t = seed += 0x6D2B79F5;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
 // ===== 商城 / 铜钱 / 道具 =====
 let coins = parseInt(localStorage.getItem(COINS_KEY) || '0');
 
@@ -70,7 +83,7 @@ let equippedItemP2 = localStorage.getItem(EQUIPPED_P2_KEY) || '';
 let thisRunHasLuopan = false;
 let thisRunHasLuopanP1 = false;
 let thisRunHasLuopanP2 = false;
-let thisRunRecordHintShown = false;
+// ★ 已移除 thisRunRecordHintShown，改用实时判断
 
 function saveCoins() { try { localStorage.setItem(COINS_KEY, String(coins)); } catch(e) {} }
 function saveInventory() { try { localStorage.setItem(INVENTORY_KEY, JSON.stringify(inventory)); } catch(e) {} }
@@ -250,22 +263,18 @@ return {
   ghostLeft: 0,
   ghostMode: false,
   ghostUntil: 0,
-  // 虎分身
   phantomLeft: 0,
   phantomUntil: 0,
   phantomData: null,
-  // 龙炎爆
   longLeft: 0,
   longCdUntil: 0,
   longHitCatCount: 0,
   longFireUntil: 0,
   longFireCells: null,
-  // 羊魂游
   yangLeft: 0
 };
 }
 
-// ★ 皮肤被动初始化
 function applySkinPassive(p) {
   if (!p) return;
   if (p.skinId === 'tu') p.speedMultiplier = 1.1;
@@ -298,6 +307,14 @@ if (loopActive && (!isGameOver || isDying)) { rafId = requestAnimationFrame(fram
 }
 
 function initGame() {
+// ★ 种子模式：强制猫/障碍开关
+if (currentSeedId !== null) {
+  const seedLevel = SEED_LEVELS.find(s => s.id === currentSeedId);
+  if (seedLevel) {
+    catModeEnabled = seedLevel.hasCat;
+    obstacleModeEnabled = seedLevel.hasObstacle;
+  }
+}
 snakes = [];
 if (gameMode === 'single') {
 const skinObj = SKINS[boardSkinId] || SKINS.default;
@@ -326,7 +343,9 @@ maxComboReached = 0;
 thisRunHasLuopan = false;
 thisRunHasLuopanP1 = false;
 thisRunHasLuopanP2 = false;
-thisRunRecordHintShown = false;  
+// ★ 每局开始清掉破纪录提示（不显示）
+const hintEl0 = document.getElementById('recordHint');
+if (hintEl0) hintEl0.classList.remove('show');
 scoreEl.textContent = '0'; lengthEl.textContent = '3';
 placeFood(); overlay.classList.add('hidden');
 updateGameBgm(); renderAchievements();
@@ -376,6 +395,8 @@ function applyItemToPlayer(player, itemId, which) {
 }
 
 function applyEquippedItem() {
+  // ★ 种子模式不消耗道具（公平竞争）
+  if (currentSeedId !== null) return;
   if (gameMode === 'single') {
     if (!equippedItem) return;
     const item = applyItemToPlayer(snakes[0], equippedItem, 'single');
@@ -404,7 +425,7 @@ function placeFood() {
 let valid = false, attempts = 0;
 while (!valid && attempts < 500) {
 attempts++;
-food = { x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS) };
+food = { x: Math.floor(gameRng()*COLS), y: Math.floor(gameRng()*ROWS) };
 valid = !snakes.some(p => p.body && p.body.some(s => s.x === food.x && s.y === food.y));
 if (valid && specialFood) valid = !(specialFood.x === food.x && specialFood.y === food.y);
 if (valid && obstacles.some(o => o.x === food.x && o.y === food.y)) valid = false;
@@ -416,8 +437,8 @@ if (specialFood || specialFoodCooldown > 0) return;
 let valid = false, sf, attempts = 0;
 while (!valid && attempts < 200) {
 attempts++;
-sf = { x: Math.floor(Math.random()*COLS), y: Math.floor(Math.random()*ROWS), type:'gold' };
-const r = Math.random();
+sf = { x: Math.floor(gameRng()*COLS), y: Math.floor(gameRng()*ROWS), type:'gold' };
+const r = gameRng();
 if (r < 0.30) sf.type = 'gold';
 else if (r < 0.55) sf.type = 'speed';
 else if (r < 0.85) sf.type = 'shield';
@@ -436,8 +457,8 @@ const head = snakes[0].body[0];
 let attempts = 0;
 while (attempts < 100) {
 attempts++;
-const x = Math.floor(Math.random()*COLS);
-const y = Math.floor(Math.random()*ROWS);
+const x = Math.floor(gameRng()*COLS);
+const y = Math.floor(gameRng()*ROWS);
 if (Math.abs(x-head.x)+Math.abs(y-head.y) < 5) continue;
 if (snakes.some(p => p.body && p.body.some(s => s.x===x && s.y===y))) continue;
 if (food.x===x && food.y===y) continue;
@@ -450,14 +471,14 @@ obstacles.push({x,y}); break;
 }
 function trySpawnPortal() {
 if (!obstacleModeEnabled || score < PORTAL_SCORE || portals.length >= PORTAL_MAX_PAIRS*2) return;
-if (Math.random() > 0.3) return;
+if (gameRng() > 0.3) return;
 if (!snakes[0] || !snakes[0].body || !snakes[0].body[0]) return;
 const positions = []; let attempts = 0;
 const head = snakes[0].body[0];
 while (positions.length < 2 && attempts < 300) {
 attempts++;
-const x = Math.floor(Math.random()*COLS);
-const y = Math.floor(Math.random()*ROWS);
+const x = Math.floor(gameRng()*COLS);
+const y = Math.floor(gameRng()*ROWS);
 if (Math.abs(x-head.x)+Math.abs(y-head.y) < 4) continue;
 if (snakes.some(p=>p.body&&p.body.some(s=>s.x===x&&s.y===y))) continue;
 if (food.x===x&&food.y===y) continue;
@@ -481,8 +502,8 @@ function spawnCat() {
 let valid = false, catX = 5, catY = 5, attempts = 0;
 while (!valid && attempts < 200) {
 attempts++;
-catX = Math.floor(Math.random()*COLS);
-catY = Math.floor(Math.random()*ROWS);
+catX = Math.floor(gameRng()*COLS);
+catY = Math.floor(gameRng()*ROWS);
 if (snakes.some(p=>p.body&&p.body.some(s=>Math.abs(s.x-catX)+Math.abs(s.y-catY)<5))) continue;
 if (Math.abs(food.x-catX)+Math.abs(food.y-catY) < 3) continue;
 if (specialFood && Math.abs(specialFood.x-catX)+Math.abs(specialFood.y-catY)<3) continue;
@@ -498,29 +519,19 @@ showCheatToast('🐱 野猫出现！小心尾巴！');
 function updateCat() {
 if (!catActive || !cat || isPaused || isGameOver) return;
 if (gameMode === 'double') { catActive = false; cat = null; return; }
-
-// 猫被眩晕时，跳过移动
-if (cat.stunLeft > 0) {
-  cat.stunLeft--;
-  return;
-}
-
+if (cat.stunLeft > 0) { cat.stunLeft--; return; }
 cat.moveTimer++;
 if (cat.moveTimer < 2) return;
 cat.moveTimer = 0;
 const player = snakes[0];
 if (!player || !player.alive || !player.body || player.body.length === 0) return;
-
-// 判断目标：优先追幻影
 let targetHead = player.body[0];
 if (player.phantomData && performance.now() < player.phantomUntil && player.phantomData.body && player.phantomData.body[0]) {
   targetHead = player.phantomData.body[0];
 }
 if (!targetHead) return;
-
 if (targetHead.x === cat.x && targetHead.y === cat.y) {
   if (player.phantomData && performance.now() < player.phantomUntil) {
-    // 猫碰到幻影，幻影消失
     player.phantomUntil = 0;
     player.phantomData = null;
     showCheatToast('👻 幻影被猫击碎！', 700);
@@ -596,8 +607,6 @@ return true;
 
 function killPlayer(player, reason) {
 if (!player || !player.alive) return;
-
-// 续命丹优先
 if (player.hasXuming && !player.xumingUsed) {
   player.xumingUsed = true;
   player.score = Math.floor(player.score / 2);
@@ -617,8 +626,6 @@ if (player.hasXuming && !player.xumingUsed) {
   showCheatToast('💖 续命丹生效！原地复活，分数减半');
   return;
 }
-
-// 马符咒·回春
 if (player.hasRevive && !player.reviveUsed) {
   player.reviveUsed = true;
   const startX = player.id === 'p1' ? (gameMode === 'single' ? 12 : 5) : 24;
@@ -636,7 +643,6 @@ if (player.hasRevive && !player.reviveUsed) {
   showCheatToast('🐴 马符咒·回春！原地复活，分数保留', 1400);
   return;
 }
-
 player.alive = false;
 vibrate([500, 150, 500, 150, 500]);
 shakeAmount = 35;
@@ -654,11 +660,60 @@ else gameOver(reason + ' · 平局！');
 
 function gameOver(reason) {
 if (isGameOver) return;
+// ★ 死亡/结束时立刻隐藏破纪录提示
+const hintEl = document.getElementById('recordHint');
+if (hintEl) hintEl.classList.remove('show');
 isGameOver = true; isDying = true;
 
 const finalScore = gameMode === 'single' ? score : snakes.reduce((a,p)=>a+(p.score||0),0);
 
-// 🐭 鼠符咒 · 聚财
+// ★ 种子模式：独立结算，不写金币/统计/成就
+if (currentSeedId !== null && gameMode === 'single') {
+  const key = SEED_HIGH_KEY_PREFIX + currentSeedId;
+  const oldBest = parseInt(localStorage.getItem(key) || '0');
+  const isNewRecord = score > oldBest;
+  if (isNewRecord) localStorage.setItem(key, String(score));
+  const seedLevel = SEED_LEVELS.find(s => s.id === currentSeedId);
+  const best = isNewRecord ? score : oldBest;
+
+  setTimeout(() => {
+    isDying = false;
+    stopLoop();
+    overlayTitle.textContent = '修炼失败';
+    overlayMsg.textContent =
+      (reason || '本局结束') +
+      ' · 积分 ' + score +
+      ' · 本图最高 ' + best +
+      (isNewRecord ? ' 🏆 新纪录！' : '') +
+      (seedLevel ? ' · ' + seedLevel.emoji + ' ' + seedLevel.name : '');
+    startBtn.textContent = '再次挑战';
+    overlay.classList.remove('hidden');
+    playBgm('menu');
+    if (window.__updateSkillBtn) window.__updateSkillBtn();
+
+    setTimeout(() => {
+      const el = document.getElementById('aiComment');
+      if (el && typeof generateAIComment === 'function') {
+        generateAIComment(buildAIPrompt(), el);
+      }
+    }, 200);
+
+    // ★ 种子模式专属：提交排行榜成绩
+    setTimeout(() => {
+      let playerName = localStorage.getItem('snakePlayerName');
+      if (!playerName) {
+        playerName = prompt('🏆 恭喜完成挑战！输入你的江湖名号，登上排行榜吧：', '无名侠客');
+      }
+      if (playerName && playerName.trim()) {
+        localStorage.setItem('snakePlayerName', playerName.trim());
+        submitLeaderboardScore(currentSeedId, playerName.trim(), score, snakes[0] ? snakes[0].body.length : 3);
+      }
+    }, 500);
+  }, 1200);
+  return;
+}
+
+// 普通模式：原逻辑
 let coinBonus = 0;
 if (gameMode === 'single' && boardSkinId === 'shu') coinBonus = 0.15;
 else if (gameMode === 'double' && (p1SkinId === 'shu' || p2SkinId === 'shu')) coinBonus = 0.15;
@@ -698,21 +753,23 @@ if (dtype) stats.deaths[dtype] = (stats.deaths[dtype] || 0) + 1;
 saveStats();
 
 saveAchievements(); checkAchievements();
+
 setTimeout(() => {
-isDying = false;
-stopLoop();
-overlayTitle.textContent = '修炼失败';
-overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && snakes[0] && snakes[0].body ? (' · 积分 '+score+' · 体长 '+snakes[0].body.length) : '') + ' · 🪙 +' + earnedCoins;
-startBtn.textContent = '再次入世';
-overlay.classList.remove('hidden');
-playBgm('menu');
-if (window.__updateSkillBtn) window.__updateSkillBtn();
-setTimeout(() => {
-const el = document.getElementById('aiComment');
-if (el && typeof generateAIComment === 'function') {
-generateAIComment(buildAIPrompt(), el);
-}
-}, 200);
+  isDying = false;
+  stopLoop();
+  overlayTitle.textContent = '修炼失败';
+  overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && snakes[0] && snakes[0].body ? (' · 积分 '+score+' · 体长 '+snakes[0].body.length) : '') + ' · 🪙 +' + earnedCoins;
+  startBtn.textContent = '再次入世';
+  overlay.classList.remove('hidden');
+  playBgm('menu');
+  if (window.__updateSkillBtn) window.__updateSkillBtn();
+
+  setTimeout(() => {
+    const el = document.getElementById('aiComment');
+    if (el && typeof generateAIComment === 'function') {
+      generateAIComment(buildAIPrompt(), el);
+    }
+  }, 200);
 }, 1200);
 }
 
@@ -742,7 +799,6 @@ if (p.comboTimer > 0) {
   p.comboTimer -= speed;
   if (p.comboTimer <= 0) { p.comboTimer = 0; p.comboCount = 0; }
 }
-// 幽灵模式结束判定
 if (p.ghostMode && nowTs >= p.ghostUntil) {
   p.ghostMode = false;
   if (p.body && p.body[0]) {
@@ -754,12 +810,10 @@ if (p.ghostMode && nowTs >= p.ghostUntil) {
   }
   if (window.__updateSkillBtn) window.__updateSkillBtn();
 }
-// 幻影结束判定
 if (p.phantomData && nowTs >= p.phantomUntil) {
   p.phantomData = null;
   if (window.__updateSkillBtn) window.__updateSkillBtn();
 }
-// 炎爆视觉结束
 if (p.longFireCells && nowTs >= p.longFireUntil) {
   p.longFireCells = null;
 }
@@ -839,7 +893,6 @@ p.comboTimer = (p.skinId === 'tu') ? (COMBO_WINDOW + 500) : COMBO_WINDOW;
 p.maxCombo = Math.max(p.maxCombo, p.comboCount);
 const multiplier = getComboMultiplier(p.comboCount);
 
-// 🐯 虎符咒 · 阴阳
 if (p.skinId === 'hu' && p.comboCount > 0 && p.comboCount % 5 === 0) {
   p.score += 30;
   showCheatToast('🐯 虎符咒·阴阳！连击 ' + p.comboCount + ' · +30 分', 900);
@@ -863,10 +916,10 @@ placeFood();
 let specialChance = 0.35;
 if (gameMode === 'single' && thisRunHasLuopan) specialChance = 0.7;
 else if (gameMode === 'double' && (thisRunHasLuopanP1 || thisRunHasLuopanP2)) specialChance = 0.7;
-if (!specialFood && Math.random() < specialChance) spawnSpecialFood();
+if (!specialFood && gameRng() < specialChance) spawnSpecialFood();
 if (p.foodsEaten % 3 === 0) trySpawnObstacle();
 if (p.foodsEaten % 15 === 0) trySpawnPortal();
-if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
+if (gameMode === 'single' && currentSeedId === null && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
 if (gameMode === 'double' && p.score >= WIN_SCORE) { const other = snakes.find(x=>x.id!==p.id); if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分'); }
 lengthEl.textContent = p.body.length;
 } else if (specialFood && head.x === specialFood.x && head.y === specialFood.y) {
@@ -879,7 +932,6 @@ p.comboTimer = (p.skinId === 'tu') ? (COMBO_WINDOW + 500) : COMBO_WINDOW;
 p.maxCombo = Math.max(p.maxCombo, p.comboCount);
 const multiplier = getComboMultiplier(p.comboCount);
 
-// 🐯 虎符咒 · 阴阳
 if (p.skinId === 'hu' && p.comboCount > 0 && p.comboCount % 5 === 0) {
   p.score += 30;
   showCheatToast('🐯 虎符咒·阴阳！连击 ' + p.comboCount + ' · +30 分', 900);
@@ -904,7 +956,7 @@ if (p.id === 'p1') scoreEl.textContent = p.score; else score2El.textContent = p.
 p.maxLen = Math.max(p.maxLen, p.body.length);
 showScorePop(specialFood.x, specialFood.y, p.id, baseScore, multiplier);
 spawnParticles(specialFood.x, specialFood.y, '#ffaa00'); spawnParticles(specialFood.x, specialFood.y, '#ffffff');
-if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
+if (gameMode === 'single' && currentSeedId === null && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
 if (gameMode === 'double' && p.score >= WIN_SCORE) { const other = snakes.find(x=>x.id!==p.id); if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分'); }
 specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 3000;
 }
@@ -933,7 +985,7 @@ if (p) {
 p.score += 50;
 if (gameMode === 'single') score = p.score;
 scoreEl.textContent = p.score;
-if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
+if (gameMode === 'single' && currentSeedId === null && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
 }
 showCheatToast('🎉 你围死了野猫！奖励 50 分！');
 spawnParticles(cx, cy, '#ffaa00'); spawnParticles(cx, cy, '#ff4444');
@@ -943,25 +995,28 @@ if (gameMode === 'double' && aliveNow.length <= 1) {
 if (aliveNow.length === 1) gameOver('对手已阵亡 · ' + aliveNow[0].id.toUpperCase() + ' 获胜！');
 else gameOver('双方阵亡 · 平局！');
 }
-// 🏆 破纪录提示
-if (gameMode === 'single' && highScore > 0 && !thisRunRecordHintShown) {
-  const gap = highScore - score;
-  if (gap > 0 && gap <= 100) {
-    thisRunRecordHintShown = true;
-    showRecordHint(gap);
-  }
-}
+// ★ 每次逻辑推进后刷新破纪录提示（实时更新 + 自动隐藏）
+updateRecordHint();
 }
 
-function showRecordHint(gap) {
+// ★ 破纪录提示：只有「距最高分 100 分以内、且还没破纪录」时才显示
+function updateRecordHint() {
   const el = document.getElementById('recordHint');
   if (!el) return;
-  el.textContent = '🏆 还有 ' + gap + ' 分就破记录啦！';
-  el.classList.add('show');
-  clearTimeout(el._hideTimer);
-  el._hideTimer = setTimeout(() => { el.classList.remove('show'); }, 3500);
+  // 单人 + 非种子局 + 游戏进行中 + 有历史最高分 + 差距 1~100
+  if (gameMode !== 'single' || currentSeedId !== null || isGameOver || isDying || isPaused || highScore <= 0) {
+    el.classList.remove('show');
+    return;
+  }
+  const gap = highScore - score;
+  if (gap > 0 && gap <= 100) {
+    const txt = '🏆 还有 ' + gap + ' 分就破记录啦！';
+    if (el.textContent !== txt) el.textContent = txt;
+    el.classList.add('show');
+  } else {
+    el.classList.remove('show');
+  }
 }
-
 
 function showScorePop(gx, gy, playerId, score, multiplier) {
 const pop = document.createElement('div');
@@ -996,7 +1051,6 @@ foodPulse += 0.09;
 drawFood(food, boardSkin);
 if (specialFood) drawSpecialFood(specialFood);
 
-// 龙炎爆视觉
 snakes.forEach(p => {
   if (!p.longFireCells || performance.now() >= p.longFireUntil) return;
   const now = performance.now();
@@ -1015,7 +1069,6 @@ snakes.forEach(p => {
   });
 });
 
-// 虎幻影
 snakes.forEach(p => {
   if (!p.phantomData || performance.now() >= p.phantomUntil) return;
   const now = performance.now();
@@ -1389,7 +1442,6 @@ ctx.beginPath(); ctx.arc(ct.x*GRID+GRID/2, ct.y*GRID+GRID/2, GRID*0.4, 0, Math.P
 ctx.globalAlpha = 1;
 ctx.save(); ctx.translate(catCX, catCY);
 if (cat.stunLeft > 0) {
-  // 眩晕圈
   const rot = performance.now() / 200;
   ctx.strokeStyle = 'rgba(200,140,255,0.9)';
   ctx.lineWidth = 2;
@@ -1416,7 +1468,7 @@ function togglePause() {
 if (isGameOver) { startGame(); return; }
 if (!loopActive && !isPaused) { startGame(); return; }
 isPaused = !isPaused;
-if (isPaused) { stopLoop(); playBgm('menu'); overlay.classList.add('paused'); overlayTitle.textContent='暂时闭关'; overlayMsg.textContent='按空格继续修炼'; startBtn.style.display='none'; overlay.classList.remove('hidden'); }
+if (isPaused) { stopLoop(); playBgm('menu'); overlay.classList.add('paused'); overlayTitle.textContent='暂时闭关'; overlayMsg.textContent='按空格继续修炼'; startBtn.style.display='none'; overlay.classList.remove('hidden'); updateRecordHint(); }
 else { overlay.classList.add('hidden'); overlay.classList.remove('paused'); startBtn.style.display='block'; updateGameBgm(); startLoop(); }
 }
 
@@ -1430,14 +1482,12 @@ else if (dir==='left' && p.dir.x===0) p.nextDir={x:-1,y:0};
 else if (dir==='right' && p.dir.x===0) p.nextDir={x:1,y:0};
 }
 
-// ★ 统一主动技能入口
 function triggerActiveSkill(playerIdx) {
   const p = snakes[playerIdx];
   if (!p || !p.alive) return;
   if (isPaused || isGameOver) return;
   const now = performance.now();
 
-  // 蛇：幽灵模式
   if (p.skinId === 'she') {
     if (p.ghostLeft <= 0) return;
     if (p.ghostMode && now < p.ghostUntil) return;
@@ -1452,12 +1502,10 @@ function triggerActiveSkill(playerIdx) {
     return;
   }
 
-  // 虎：分身
   if (p.skinId === 'hu') {
     if (p.phantomLeft <= 0) return;
     if (p.phantomData && now < p.phantomUntil) return;
     p.phantomLeft--;
-    // 找空位放幻影（地图中心附近随机）
     let placed = false, px = 15, py = 15;
     for (let t = 0; t < 50 && !placed; t++) {
       px = 3 + Math.floor(Math.random() * (COLS - 6));
@@ -1478,7 +1526,6 @@ function triggerActiveSkill(playerIdx) {
     return;
   }
 
-  // 龙：炎爆
   if (p.skinId === 'long') {
     if (p.longLeft <= 0) return;
     if (now < p.longCdUntil) {
@@ -1496,12 +1543,10 @@ function triggerActiveSkill(playerIdx) {
       const fy = head.y + dir.y * i;
       if (fx < 0 || fx >= COLS || fy < 0 || fy >= ROWS) break;
       cells.push({x: fx, y: fy});
-      // 清除石头
       if (obstacles.some(o => o.x === fx && o.y === fy)) {
         obstacles = obstacles.filter(o => !(o.x === fx && o.y === fy));
         spawnParticles(fx, fy, '#ffaa00');
       }
-      // 击中猫
       if (catActive && cat && cat.x === fx && cat.y === fy) {
         cat.stunLeft = (cat.stunLeft || 0) + 1;
         p.longHitCatCount = (p.longHitCatCount || 0) + 1;
@@ -1513,7 +1558,7 @@ function triggerActiveSkill(playerIdx) {
           p.score += 100;
           if (gameMode === 'single') score = p.score;
           scoreEl.textContent = p.score;
-          if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
+          if (gameMode === 'single' && currentSeedId === null && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
           showCheatToast('🐲 龙符咒·炎爆！两次全中，野猫被烧死 +100 分！', 1600);
         } else {
           showCheatToast('🐲 炎爆击中野猫！猫停 1 次移动（已击中 ' + p.longHitCatCount + '/2）', 1200);
@@ -1529,7 +1574,6 @@ function triggerActiveSkill(playerIdx) {
     return;
   }
 
-  // 羊：魂游
   if (p.skinId === 'yang') {
     if (p.yangLeft <= 0) return;
     p.yangLeft--;
@@ -1548,10 +1592,53 @@ function triggerActiveSkill(playerIdx) {
   }
 }
 
-// 兼容旧调用名
 function triggerGhostSkill(playerIdx) { triggerActiveSkill(playerIdx); }
 
 window.__triggerGhostSkill = triggerGhostSkill;
 window.__triggerActiveSkill = triggerActiveSkill;
 
-function startGame() { startBtn.style.display='block'; overlay.classList.remove('paused'); stopLoop(); initGame(); applyEquippedItem(); startLoop(); if (window.__updateSkillBtn) window.__updateSkillBtn(); }
+function startGame() {
+  // ★ 种子模式：重置 RNG 到种子初始状态
+  if (currentSeedId !== null) {
+    const seedLevel = SEED_LEVELS.find(s => s.id === currentSeedId);
+    if (seedLevel) {
+      gameRng = mulberry32(seedLevel.seed);
+    }
+  }
+  startBtn.style.display='block';
+  overlay.classList.remove('paused');
+  stopLoop();
+  initGame();
+  applyEquippedItem();
+  startLoop();
+  if (window.__updateSkillBtn) window.__updateSkillBtn();
+}
+
+// 暴露给 ui.js 调用的种子模式入口
+window.__startSeedGame = function(seedId) {
+  currentSeedId = seedId;
+  gameMode = 'single';
+  startGame();
+};
+window.__clearSeedMode = function() {
+  currentSeedId = null;
+  gameRng = Math.random;
+};
+// ★ 提交排行榜成绩
+async function submitLeaderboardScore(seedId, playerName, score, length) {
+  try {
+    const res = await fetch('https://zhipu.wange5232.workers.dev/leaderboard/submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seedId, playerName, score, length })
+    });
+    const data = await res.json();
+    if (data.error) {
+      showCheatToast('⚠️ ' + data.error, 2000);
+    } else {
+      showCheatToast('🏆 成绩已上传排行榜！', 1500);
+    }
+  } catch (e) {
+    console.warn('排行榜提交失败:', e);
+  }
+}

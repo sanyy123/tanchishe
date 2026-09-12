@@ -227,7 +227,113 @@ canvas { display: block; background: #0d1117; width: 100%; height: 100%; }
   .shop-item-emoji { font-size: 1.7rem; width: 38px; }
   .shop-item-btn { padding: 7px 11px; font-size: 0.75rem; }
 }
-/* ===== 破纪录提示 ===== */
-.record-hint { position: absolute; top: -50px; left: 50%; transform: translateX(-50%) translateY(-20px) scale(0.9); background: linear-gradient(135deg, #f15bb5 0%, #9b5de5 100%); color: #fff; font-weight: 800; font-size: 0.95rem; padding: 10px 24px; border-radius: 50px; box-shadow: 0 10px 30px rgba(241,91,181,0.5), 0 0 40px rgba(155,93,229,0.3); opacity: 0; pointer-events: none; transition: all 0.5s cubic-bezier(0.34, 1.56, 0.64, 1); z-index: 10; white-space: nowrap; letter-spacing: 0.5px; }
-.record-hint.show { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
-@media (max-width: 640px) { .record-hint { font-size: 0.8rem; padding: 8px 18px; top: -44px; } }
+/* ===== 破纪录提示（右上角悬挂 · 常驻 · 不遮挡棋盘） ===== */
+.record-hint {
+  position: absolute;
+  top: -52px;
+  right: 6px;
+  transform: translateY(-14px) scale(0.92);
+  background: linear-gradient(135deg, #f15bb5 0%, #9b5de5 100%);
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.85rem;
+  padding: 8px 18px;
+  border-radius: 50px;
+  box-shadow: 0 10px 30px rgba(241,91,181,0.5), 0 0 40px rgba(155,93,229,0.3);
+  opacity: 0;
+  pointer-events: none;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 12;
+  white-space: nowrap;
+  letter-spacing: 0.5px;
+}
+.record-hint.show {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+@media (max-width: 640px) {
+  .record-hint {
+    font-size: 0.72rem;
+    padding: 6px 14px;
+    top: -46px;
+    right: 4px;
+  }
+}
+/* ===== 页面跳转加载遮罩 ===== */
+.global-loading { position: fixed; inset: 0; background: #0a0e17; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity 0.35s ease; }
+.global-loading.hidden { opacity: 0; pointer-events: none; }
+.global-loading-box { text-align: center; }
+.global-loading-box h2 { color: #00f5d4; font-size: 1.2rem; font-weight: 800; margin-bottom: 16px; letter-spacing: 1px; }
+.global-loading-bar { width: 220px; height: 10px; background: rgba(15,23,42,0.8); border-radius: 10px; overflow: hidden; border: 1px solid rgba(0,245,212,0.3); }
+.global-loading-bar > div { height: 100%; width: 0%; background: linear-gradient(90deg, #00f5d4, #9b5de5); border-radius: 10px; transition: width 0.3s ease; }
+/* ===== 种子局弹窗 ===== */
+#seedModal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 55; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+#seedModal.show { opacity: 1; pointer-events: auto; }
+.seed-box { width: 92%; max-width: 520px; max-height: 85vh; background: rgba(15,23,42,0.98); border-radius: 20px; border: 1px solid rgba(0,245,212,0.3); box-shadow: 0 25px 60px rgba(0,0,0,0.5), 0 0 40px rgba(0,245,212,0.15); display: flex; flex-direction: column; overflow: hidden; }
+.seed-header { padding: 16px 20px; border-bottom: 1px solid rgba(148,163,184,0.15); display: flex; align-items: center; justify-content: space-between; background: linear-gradient(90deg, rgba(0,245,212,0.1), rgba(155,93,229,0.1)); flex-shrink: 0; }
+.seed-header h3 { font-size: 1.2rem; font-weight: 800; background: linear-gradient(90deg, #00f5d4, #9b5de5); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.seed-list { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+.seed-card { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: rgba(30,41,59,0.5); border: 2px solid transparent; border-radius: 14px; cursor: pointer; transition: all 0.2s; }
+.seed-card:hover { border-color: rgba(0,245,212,0.4); transform: translateY(-2px); }
+.seed-num { width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: 800; background: linear-gradient(135deg, #00f5d4, #9b5de5); color: #0a0e17; flex-shrink: 0; }
+.seed-info { flex: 1; min-width: 0; }
+.seed-name { font-weight: 800; font-size: 0.95rem; color: #e2e8f0; margin-bottom: 4px; }
+.seed-tags { font-size: 0.72rem; color: #94a3b8; margin-bottom: 4px; }
+.seed-tags .tag { display: inline-block; padding: 1px 6px; border-radius: 6px; margin-right: 4px; font-weight: 700; }
+.seed-tags .tag-cat { background: rgba(241,91,181,0.15); color: #f15bb5; }
+.seed-tags .tag-obs { background: rgba(255,204,0,0.15); color: #ffcc00; }
+.seed-best { font-size: 0.75rem; color: #94a3b8; }
+.seed-best .best-score { color: #ffcc00; font-weight: 800; }
+.seed-tip { padding: 12px 20px; border-top: 1px solid rgba(148,163,184,0.12); font-size: 0.78rem; color: #64748b; text-align: center; flex-shrink: 0; background: rgba(15,23,42,0.6); line-height: 1.6; }
+/* ===== 排行榜弹窗 ===== */
+.seed-leaderboard-entry { text-align: center; padding: 8px 0 4px; }
+.seed-lb-btn { background: linear-gradient(135deg, #f15bb5, #9b5de5); border: none; color: #fff; font-family: 'Nunito', sans-serif; font-weight: 800; font-size: 0.85rem; padding: 10px 24px; border-radius: 50px; cursor: pointer; box-shadow: 0 6px 20px rgba(155,93,229,0.35); transition: all 0.2s; }
+.seed-lb-btn:hover { transform: scale(1.05); box-shadow: 0 8px 25px rgba(155,93,229,0.5); }
+
+#leaderboardModal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 80; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+#leaderboardModal.show { opacity: 1; pointer-events: auto; }
+.leaderboard-box { width: 92%; max-width: 480px; max-height: 80vh; background: rgba(15,23,42,0.98); border-radius: 20px; border: 1px solid rgba(241,91,181,0.3); box-shadow: 0 25px 60px rgba(0,0,0,0.5), 0 0 40px rgba(241,91,181,0.15); display: flex; flex-direction: column; overflow: hidden; }
+.leaderboard-header { padding: 16px 20px; border-bottom: 1px solid rgba(148,163,184,0.15); display: flex; align-items: center; justify-content: space-between; background: linear-gradient(90deg, rgba(241,91,181,0.1), rgba(155,93,229,0.1)); flex-shrink: 0; }
+.leaderboard-header h3 { font-size: 1.2rem; font-weight: 800; background: linear-gradient(90deg, #f15bb5, #9b5de5); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.leaderboard-content { flex: 1; overflow-y: auto; padding: 12px 16px; scrollbar-width: thin; scrollbar-color: #334155 transparent; }
+.leaderboard-list { display: flex; flex-direction: column; gap: 8px; }
+.leaderboard-row { display: flex; align-items: center; padding: 12px 14px; background: rgba(30,41,59,0.6); border-radius: 12px; border: 1px solid transparent; transition: all 0.2s; }
+.leaderboard-row.is-me { border-color: #f15bb5; background: rgba(241,91,181,0.1); box-shadow: 0 0 16px rgba(241,91,181,0.2); }
+.lb-rank { font-weight: 800; font-size: 1.1rem; width: 40px; flex-shrink: 0; color: #ffcc00; text-align: center; }
+.lb-name { flex: 1; font-size: 0.9rem; color: #e2e8f0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 8px; }
+.lb-score { font-weight: 800; font-size: 1rem; color: #00f5d4; text-shadow: 0 0 10px rgba(0,245,212,0.5); }
+.leaderboard-empty, .leaderboard-loading { text-align: center; color: #64748b; padding: 40px 20px; font-size: 0.9rem; line-height: 1.8; }
+/* ===== 种子卡片上的排行榜图标按钮 ===== */
+.seed-lb-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(241,91,181,0.4);
+  background: rgba(241,91,181,0.12);
+  color: #f15bb5;
+  font-size: 1.15rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  font-family: 'Nunito', sans-serif;
+  padding: 0;
+}
+.seed-lb-icon:hover {
+  background: rgba(241,91,181,0.28);
+  border-color: #f15bb5;
+  box-shadow: 0 0 14px rgba(241,91,181,0.45);
+  transform: scale(1.08);
+}
+.seed-lb-icon:active {
+  transform: scale(0.95);
+}
+@media (max-width: 640px) {
+  .seed-lb-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 1rem;
+  }
+}

@@ -7,6 +7,12 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="globalLoading" class="global-loading hidden">
+  <div class="global-loading-box">
+    <h2 id="globalLoadingText">加载中...</h2>
+    <div class="global-loading-bar"><div id="globalLoadingProgress"></div></div>
+  </div>
+</div>
 <div class="title-area">
 <h1>🐍 十二生肖闯江湖</h1>
 <p class="subtitle">宝宝专属 · 修炼之路由此开启</p>
@@ -39,8 +45,10 @@
 <p id="aiComment" style="font-size:0.95rem; color:#00f5d4; margin-bottom:18px; min-height:24px; text-align:center; padding:0 20px; line-height:1.5;"></p>
 <button id="startBtn">开始修炼</button>
 <div class="mode-select" id="modeSelect">
-<button class="mode-btn active" id="modeSingle" data-mode="single">👤 单人模式</button>
-<button class="mode-btn" id="modeDouble" data-mode="double">👥 双人模式</button>
+<button class="mode-btn active" id="modeSingle" data-mode="single">👤 单人</button>
+<button class="mode-btn" id="modeDouble" data-mode="double">👥 双人</button>
+<button class="mode-btn" id="modeSeed" data-mode="seed">🌱 挑战</button>
+<button class="mode-btn" id="modeMaze" data-mode="maze">🗺️ 迷宫</button>
 </div>
 </div>
 <div class="pause-hint">空格 · 暂停</div>
@@ -96,6 +104,18 @@
   </div>
 </div>
 
+<!-- ===== 种子局弹窗 ===== -->
+<div id="seedModal">
+  <div class="seed-box">
+    <div class="seed-header">
+      <h3>🌱 江湖挑战</h3>
+      <button class="close-btn" id="closeSeed">×</button>
+    </div>
+    <div class="seed-list" id="seedList"></div>
+    <div class="seed-tip">💡 每张图的随机序列固定，公平竞争，可反复挑战刷分。挑战不消耗道具、不解锁成就。</div>
+  </div>
+</div>
+
 <div id="dualSkinModal">
   <div class="dual-skin-box">
     <div class="dual-skin-header">
@@ -120,6 +140,18 @@
     </div>
     <div class="dual-skin-footer">
       <button class="dual-next-btn" id="dualNextBtn">下一步 →</button>
+    </div>
+  </div>
+</div>
+<!-- ===== 排行榜弹窗 ===== -->
+<div id="leaderboardModal">
+  <div class="leaderboard-box">
+    <div class="leaderboard-header">
+      <h3 id="leaderboardTitle">🏆 全球排行榜</h3>
+      <button class="close-btn" id="closeLeaderboard">×</button>
+    </div>
+    <div class="leaderboard-content" id="leaderboardContent">
+      <!-- 动态渲染排行榜 -->
     </div>
   </div>
 </div>
