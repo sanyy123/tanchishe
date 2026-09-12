@@ -18,12 +18,13 @@ if (newly.length) { saveAchievements(); renderAchievements(); newly.forEach((a,i
 }
 function showAchieveToast(a) { toastIcon.textContent = a.icon; toastName.textContent = a.name; achieveToast.classList.add('show'); setTimeout(()=>achieveToast.classList.remove('show'), 2800); }
 
-function showCheatToast(msg) {
+function showCheatToast(msg, duration) {
 const t = document.createElement('div');
 t.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:linear-gradient(135deg,#00f5d4,#9b5de5);color:#0a0e17;padding:16px 32px;border-radius:16px;font-weight:800;font-size:1.1rem;z-index:200;box-shadow:0 15px 40px rgba(0,245,212,0.5);pointer-events:none;transition:opacity 0.5s;max-width:80%;text-align:center;';
 t.textContent = msg;
 document.body.appendChild(t);
-setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(), 500); }, 1800);
+const dur = duration || 1800;
+setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(), 500); }, dur);
 }
 function cheatUnlockSkins() {
 Object.values(SKINS).forEach(s => { if (s.unlockId) cheatSkins.add(s.unlockId); });
@@ -38,11 +39,10 @@ showCheatToast('✨ 1314 作弊成功 · 全部皮肤 + 成就已解锁！');
 }
 
 // ==================== ★ AI 评语配置（智谱 + 代理） ★ ====================
-const AI_API_KEY  = '691e8784c6954ae9be22fe6a49bba291.FNecmlca4jQOQoH6'; // ★ 替换为你第一步拿到的 Key
-const AI_BASE_URL = 'https://zhipu.wange5232.workers.dev/v4'; // ★ 替换为你的 Worker 地址，注意末尾要加上 /v4 
+const AI_API_KEY  = '691e8784c6954ae9be22fe6a49bba291.FNecmlca4jQOQoH6';
+const AI_BASE_URL = 'https://zhipu.wange5232.workers.dev/v4';
 const AI_MODEL    = 'glm-4-flash';
 
-// ★ 人设：小江湖，江湖客栈的老板娘
 const AI_SYSTEM_PROMPT = [
 '你是"小江湖"，是十二生肖闯江湖客栈的老板娘，性格古灵精怪、说话带江湖气。',
 '',
@@ -59,7 +59,6 @@ const AI_SYSTEM_PROMPT = [
 '5. 评语不超过30字，直接输出评语，不加引号、不加前缀、不加表情符号。'
 ].join('\n');
 
-// ★ 语气池：每次随机挑一个
 const TONE_POOL = [
 { id: '傲娇',   desc: '嘴上嫌弃，其实是在夸；用"哼"、"才不是"、"勉强"等词。' },
 { id: '毒舌',   desc: '犀利吐槽但不伤人；用夸张对比、反话正说。' },
@@ -71,10 +70,8 @@ const TONE_POOL = [
 { id: '腹黑',   desc: '表面夸奖，暗地埋梗；用"呵呵"、"果然如此"、"我早说过"。' }
 ];
 
-// ★ 最近评语历史（内存里保留最近 5 条）
-let recentComments = [];/**
- * 流式生成 AI 评语，逐字显示到 targetEl
- */
+let recentComments = [];
+
 async function generateAIComment(prompt, targetEl) {
 if (!targetEl) return;
 if (!AI_API_KEY || AI_API_KEY === '你的Groq_Key') {
@@ -138,7 +135,6 @@ targetEl.textContent = fb;
 recentComments.push(fb);
 if (recentComments.length > 5) recentComments.shift();
 } else {
-// 记录 AI 生成的评语，用于下次避重复
 recentComments.push(fullText);
 if (recentComments.length > 5) recentComments.shift();
 }
@@ -151,7 +147,6 @@ if (recentComments.length > 5) recentComments.shift();
 }
 }
 
-// 本地兜底评语
 function getFallbackComment() {
 const list = [
 '宝宝，这走位江湖上怕是要传开了！',
@@ -163,16 +158,13 @@ const list = [
 return list[Math.floor(Math.random() * list.length)];
 }
 
-// 根据游戏数据构建提示词
 function buildAIPrompt() {
 const p = (snakes && snakes[0]) || {};
 const s = p.score || 0;
 const l = (p.body && p.body.length) || 3;
 const f = p.foodsEaten || 0;
 
-// 随机挑一个本次语气
 const tone = TONE_POOL[Math.floor(Math.random() * TONE_POOL.length)];
-// 把本次语气存起来，稍后展示 / 记录用
 window.__currentTone = tone.id;
 
 let prompt = '';
@@ -201,6 +193,10 @@ const card = document.createElement('div');
 card.className = 'skin-card' + (currentSkinId === skin.id ? ' active' : '') + (!unlockedSkin ? ' locked' : '');
 card.innerHTML = '<div class="skin-emoji">'+skin.emoji+'</div><div class="skin-name">'+skin.name+'</div>'+( !unlockedSkin ? '<div class="skin-lock">🔒 未解锁</div>' : (currentSkinId === skin.id ? '<div class="skin-lock" style="color:#00f5d4">使用中</div>' : '') );
 if (unlockedSkin) card.addEventListener('click', () => {
+if (isPaused || (loopActive && !isGameOver)) {
+showCheatToast('⏸️ 游戏中无法换皮肤，请结束本局后再试', 1200);
+return;
+}
 currentSkinId = skin.id;
 boardSkinId = skin.id;
 localStorage.setItem('snakeCurrentSkin', currentSkinId);
@@ -233,6 +229,285 @@ guideNavEl.appendChild(btn);
 function renderGuideContent() {
 const g = GUIDE_DATA.find(x => x.id === currentGuideKey) || GUIDE_DATA[0];
 guideContentEl.innerHTML = g.content;
+}
+
+// ===== 数据统计面板 =====
+function renderStats() {
+const listEl = document.getElementById('statsList');
+if (!listEl) return;
+const fmtTime = (s) => {
+s = Math.floor(s || 0);
+if (s < 60) return s + ' 秒';
+const m = Math.floor(s / 60), r = s % 60;
+return m + ' 分 ' + r + ' 秒';
+};
+const deathTotal = Object.values(stats.deaths).reduce((a,b)=>a+b, 0) || 1;
+const pct = (n) => deathTotal > 0 ? Math.round(n / deathTotal * 100) : 0;
+
+let html = '';
+html += '<div class="stats-section">';
+html += '<div class="stats-section-title">📊 生涯总览</div>';
+html += '<div class="stats-row"><span class="stats-label">🎮 总游玩局数</span><span class="stats-value">' + stats.totalGames + ' 局</span></div>';
+html += '<div class="stats-row"><span class="stats-label">👤 单人局数</span><span class="stats-value">' + stats.singleGames + ' 局</span></div>';
+html += '<div class="stats-row"><span class="stats-label">👥 双人局数</span><span class="stats-value">' + stats.doubleGames + ' 局</span></div>';
+html += '<div class="stats-row"><span class="stats-label">⏱️ 累计游戏时长</span><span class="stats-value">' + fmtTime(stats.totalPlayTime) + '</span></div>';
+html += '<div class="stats-row"><span class="stats-label">🍎 累计吃食物</span><span class="stats-value">' + stats.totalFoodsEaten + ' 个</span></div>';
+html += '<div class="stats-row"><span class="stats-label">💰 累计总分</span><span class="stats-value">' + totalScoreAccum + ' 分</span></div>';
+html += '</div>';
+
+html += '<div class="stats-section">';
+html += '<div class="stats-section-title">🏆 最高纪录</div>';
+html += '<div class="stats-row"><span class="stats-label">🥇 最高分</span><span class="stats-value gold">' + highScore + ' 分</span></div>';
+html += '<div class="stats-row"><span class="stats-label">📏 最长体长</span><span class="stats-value gold">' + stats.bestLength + ' 节</span></div>';
+html += '<div class="stats-row"><span class="stats-label">⏳ 最长生存</span><span class="stats-value gold">' + fmtTime(stats.bestSurvivalTime) + '</span></div>';
+html += '<div class="stats-row"><span class="stats-label">🔥 最高连击</span><span class="stats-value gold">' + stats.bestCombo + ' 连</span></div>';
+html += '<div class="stats-row"><span class="stats-label">🍽️ 单局最多食物</span><span class="stats-value gold">' + stats.bestFoodsEaten + ' 个</span></div>';
+html += '</div>';
+
+html += '<div class="stats-section">';
+html += '<div class="stats-section-title">💀 死因分布</div>';
+html += '<div class="stats-row"><span class="stats-label">🧱 撞墙</span><span class="stats-value pink">' + stats.deaths.wall + ' 次 · ' + pct(stats.deaths.wall) + '%</span></div>';
+html += '<div class="stats-row"><span class="stats-label">🐍 咬到自己</span><span class="stats-value pink">' + stats.deaths.self + ' 次 · ' + pct(stats.deaths.self) + '%</span></div>';
+html += '<div class="stats-row"><span class="stats-label">💥 撞到对方</span><span class="stats-value pink">' + stats.deaths.other + ' 次 · ' + pct(stats.deaths.other) + '%</span></div>';
+html += '<div class="stats-row"><span class="stats-label">🐱 被猫抓住</span><span class="stats-value pink">' + stats.deaths.cat + ' 次 · ' + pct(stats.deaths.cat) + '%</span></div>';
+html += '<div class="stats-row"><span class="stats-label">✂️ 被猫咬断</span><span class="stats-value pink">' + stats.deaths.catBite + ' 次 · ' + pct(stats.deaths.catBite) + '%</span></div>';
+html += '<div class="stats-row"><span class="stats-label">🪨 撞到石头</span><span class="stats-value pink">' + stats.deaths.obstacle + ' 次 · ' + pct(stats.deaths.obstacle) + '%</span></div>';
+html += '</div>';
+
+listEl.innerHTML = html;
+}
+
+// ===== 商城 UI =====
+let currentShopTab = 'shop';
+
+function openShop() {
+  currentShopTab = 'shop';
+  renderShop();
+  shopModal.classList.add('show');
+}
+
+function renderShop() {
+  const coinsEl = document.getElementById('shopCoins');
+  if (coinsEl) coinsEl.textContent = coins;
+
+  document.querySelectorAll('.shop-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === currentShopTab);
+  });
+
+  const contentEl = document.getElementById('shopContent');
+  if (!contentEl) return;
+
+  if (gameMode === 'double') {
+    contentEl.innerHTML = currentShopTab === 'shop' ? renderShopItemsDouble() : renderInventoryItemsDouble();
+  } else {
+    contentEl.innerHTML = currentShopTab === 'shop' ? renderShopItemsSingle() : renderInventoryItemsSingle();
+  }
+  bindShopEvents();
+}
+
+function renderShopItemsSingle() {
+  let html = '';
+  SHOP_ITEMS.forEach(item => {
+    const owned = inventory[item.id] || 0;
+    const canAfford = coins >= item.price;
+    html += '<div class="shop-item">';
+    html += '<div class="shop-item-emoji">' + item.emoji + '</div>';
+    html += '<div class="shop-item-info">';
+    html += '<div class="shop-item-name">' + item.name + (owned > 0 ? ' <span class="shop-item-owned">拥有 ×' + owned + '</span>' : '') + '</div>';
+    html += '<div class="shop-item-desc">' + item.desc + '</div>';
+    html += '</div>';
+    html += '<button class="shop-item-btn' + (canAfford ? '' : ' disabled') + '" data-buy="' + item.id + '">' + item.price + ' 🪙</button>';
+    html += '</div>';
+  });
+  return html;
+}
+
+function renderShopItemsDouble() {
+  let html = '';
+  SHOP_ITEMS.forEach(item => {
+    const ownedP1 = inventoryP1[item.id] || 0;
+    const ownedP2 = inventoryP2[item.id] || 0;
+    const canAfford = coins >= item.price;
+    html += '<div class="shop-item double">';
+    html += '<div class="shop-item-emoji">' + item.emoji + '</div>';
+    html += '<div class="shop-item-info">';
+    html += '<div class="shop-item-name">' + item.name + '</div>';
+    html += '<div class="shop-item-desc">' + item.desc + '</div>';
+    html += '</div>';
+    html += '<div class="shop-item-actions">';
+    html += '<button class="shop-item-btn p1' + (canAfford ? '' : ' disabled') + '" data-buy-p1="' + item.id + '">P1<br>' + item.price + '🪙' + (ownedP1 > 0 ? ' ×' + ownedP1 : '') + '</button>';
+    html += '<button class="shop-item-btn p2' + (canAfford ? '' : ' disabled') + '" data-buy-p2="' + item.id + '">P2<br>' + item.price + '🪙' + (ownedP2 > 0 ? ' ×' + ownedP2 : '') + '</button>';
+    html += '</div>';
+    html += '</div>';
+  });
+  return html;
+}
+
+function renderInventoryItemsSingle() {
+  const keys = Object.keys(inventory).filter(k => inventory[k] > 0);
+  if (keys.length === 0) {
+    return '<div class="shop-empty">🎒 背包空空如也<br>快去道具商店买点东西吧～</div>';
+  }
+  let html = '';
+  keys.forEach(id => {
+    const item = SHOP_ITEMS.find(x => x.id === id);
+    if (!item) return;
+    const count = inventory[id];
+    const isEquipped = equippedItem === id;
+    html += '<div class="shop-item' + (isEquipped ? ' equipped' : '') + '">';
+    html += '<div class="shop-item-emoji">' + item.emoji + '</div>';
+    html += '<div class="shop-item-info">';
+    html += '<div class="shop-item-name">' + item.name + ' <span class="shop-item-owned">×' + count + '</span></div>';
+    html += '<div class="shop-item-desc">' + item.desc + '</div>';
+    html += '</div>';
+    if (isEquipped) html += '<button class="shop-item-btn equipped" data-unequip="1">已装备</button>';
+    else html += '<button class="shop-item-btn equip" data-equip="' + id + '">装备</button>';
+    html += '</div>';
+  });
+  html += '<div class="shop-tip">💡 装备后下一局自动使用，一局只能装备一个道具。</div>';
+  return html;
+}
+
+function renderInventoryItemsDouble() {
+  let html = '';
+
+  html += '<div class="inv-player-section"><div class="inv-player-title p1">P1 的背包</div>';
+  const keys1 = Object.keys(inventoryP1).filter(k => inventoryP1[k] > 0);
+  if (keys1.length === 0) {
+    html += '<div class="shop-empty small">背包空空</div>';
+  } else {
+    keys1.forEach(id => {
+      const item = SHOP_ITEMS.find(x => x.id === id);
+      if (!item) return;
+      const count = inventoryP1[id];
+      const isEquipped = equippedItemP1 === id;
+      html += '<div class="shop-item small' + (isEquipped ? ' equipped p1' : '') + '">';
+      html += '<div class="shop-item-emoji">' + item.emoji + '</div>';
+      html += '<div class="shop-item-info"><div class="shop-item-name">' + item.name + ' <span class="shop-item-owned">×' + count + '</span></div></div>';
+      if (isEquipped) html += '<button class="shop-item-btn equipped" data-unequip-p1="1">已装备</button>';
+      else html += '<button class="shop-item-btn equip" data-equip-p1="' + id + '">装备</button>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+
+  html += '<div class="inv-player-section"><div class="inv-player-title p2">P2 的背包</div>';
+  const keys2 = Object.keys(inventoryP2).filter(k => inventoryP2[k] > 0);
+  if (keys2.length === 0) {
+    html += '<div class="shop-empty small">背包空空</div>';
+  } else {
+    keys2.forEach(id => {
+      const item = SHOP_ITEMS.find(x => x.id === id);
+      if (!item) return;
+      const count = inventoryP2[id];
+      const isEquipped = equippedItemP2 === id;
+      html += '<div class="shop-item small' + (isEquipped ? ' equipped p2' : '') + '">';
+      html += '<div class="shop-item-emoji">' + item.emoji + '</div>';
+      html += '<div class="shop-item-info"><div class="shop-item-name">' + item.name + ' <span class="shop-item-owned">×' + count + '</span></div></div>';
+      if (isEquipped) html += '<button class="shop-item-btn equipped" data-unequip-p2="1">已装备</button>';
+      else html += '<button class="shop-item-btn equip" data-equip-p2="' + id + '">装备</button>';
+      html += '</div>';
+    });
+  }
+  html += '</div>';
+
+  html += '<div class="shop-tip">💡 P1 和 P2 的背包独立，装备后下一局自动使用。铜钱是共用的。</div>';
+  return html;
+}
+
+function bindShopEvents() {
+  document.querySelectorAll('[data-buy]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.buy;
+      const item = SHOP_ITEMS.find(x => x.id === id);
+      if (!item) return;
+      if (coins < item.price) { showCheatToast('🪙 铜钱不够啦', 700); return; }
+      coins -= item.price;
+      inventory[id] = (inventory[id] || 0) + 1;
+      saveCoins(); saveInventory();
+      renderShop();
+      showCheatToast('✅ 购买成功「' + item.name + '」', 700);
+    });
+  });
+
+  document.querySelectorAll('[data-buy-p1]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.buyP1;
+      const item = SHOP_ITEMS.find(x => x.id === id);
+      if (!item) return;
+      if (coins < item.price) { showCheatToast('🪙 铜钱不够啦', 700); return; }
+      coins -= item.price;
+      inventoryP1[id] = (inventoryP1[id] || 0) + 1;
+      saveCoins(); saveInventoryP1();
+      renderShop();
+      showCheatToast('✅ P1 购买「' + item.name + '」', 700);
+    });
+  });
+
+  document.querySelectorAll('[data-buy-p2]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.buyP2;
+      const item = SHOP_ITEMS.find(x => x.id === id);
+      if (!item) return;
+      if (coins < item.price) { showCheatToast('🪙 铜钱不够啦', 700); return; }
+      coins -= item.price;
+      inventoryP2[id] = (inventoryP2[id] || 0) + 1;
+      saveCoins(); saveInventoryP2();
+      renderShop();
+      showCheatToast('✅ P2 购买「' + item.name + '」', 700);
+    });
+  });
+
+  document.querySelectorAll('[data-equip]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      equippedItem = btn.dataset.equip;
+      localStorage.setItem(EQUIPPED_KEY, equippedItem);
+      renderShop();
+      const item = SHOP_ITEMS.find(x => x.id === equippedItem);
+      showCheatToast('✨ 已装备「' + (item ? item.name : '') + '」', 700);
+    });
+  });
+  document.querySelectorAll('[data-unequip]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      equippedItem = '';
+      localStorage.removeItem(EQUIPPED_KEY);
+      renderShop();
+    });
+  });
+
+  document.querySelectorAll('[data-equip-p1]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      equippedItemP1 = btn.dataset.equipP1;
+      localStorage.setItem(EQUIPPED_P1_KEY, equippedItemP1);
+      renderShop();
+      const item = SHOP_ITEMS.find(x => x.id === equippedItemP1);
+      showCheatToast('✨ P1 装备「' + (item ? item.name : '') + '」', 700);
+    });
+  });
+  document.querySelectorAll('[data-unequip-p1]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      equippedItemP1 = '';
+      localStorage.removeItem(EQUIPPED_P1_KEY);
+      renderShop();
+    });
+  });
+
+  document.querySelectorAll('[data-equip-p2]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      equippedItemP2 = btn.dataset.equipP2;
+      localStorage.setItem(EQUIPPED_P2_KEY, equippedItemP2);
+      renderShop();
+      const item = SHOP_ITEMS.find(x => x.id === equippedItemP2);
+      showCheatToast('✨ P2 装备「' + (item ? item.name : '') + '」', 700);
+    });
+  });
+  document.querySelectorAll('[data-unequip-p2]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      equippedItemP2 = '';
+      localStorage.removeItem(EQUIPPED_P2_KEY);
+      renderShop();
+    });
+  });
 }
 
 // ===== 猫模式按钮 =====
@@ -274,6 +549,14 @@ if (!obstacleModeEnabled) { obstacles = []; portals = []; }
 // ===== 模式选择按钮 =====
 const modeSingleBtn = document.getElementById('modeSingle');
 const modeDoubleBtn = document.getElementById('modeDouble');
+
+const isMobileDevice = ('ontouchstart' in window) && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+if (isMobileDevice) {
+  modeDoubleBtn.disabled = true;
+  modeDoubleBtn.textContent = '👥 双人(手机不支持)';
+  modeDoubleBtn.title = '手机端暂不支持双人模式';
+}
+
 function updateModeButtons() {
 modeSingleBtn.classList.toggle('active', gameMode === 'single');
 modeDoubleBtn.classList.toggle('active', gameMode === 'double');
@@ -289,6 +572,7 @@ startBtn.textContent = '开始修炼';
 });
 modeDoubleBtn.addEventListener('click', () => {
 if (gameMode === 'double') return;
+if (isMobileDevice) return;
 gameMode = 'double';
 updateModeButtons();
 updateCatModeBtn();
@@ -367,7 +651,9 @@ dualSkinModal.classList.remove('show');
 startBtn.style.display = 'block';
 stopLoop();
 initGame();
+applyEquippedItem();
 startLoop();
+if (window.__updateSkillBtn) window.__updateSkillBtn();
 }
 });
 
@@ -388,8 +674,14 @@ titleTapTimer = setTimeout(() => { titleTapCount = 0; }, 2000);
 let cheatBuffer = '';
 document.addEventListener('keydown', (e) => {
 const key = e.key.toLowerCase();
-if (['arrowup','arrowdown','arrowleft','arrowright',' ','w','a','s','d'].includes(key)) e.preventDefault();
+if (['arrowup','arrowdown','arrowleft','arrowright',' ','w','a','s','d','e','p'].includes(key)) e.preventDefault();
 if (key === ' ') { togglePause(); return; }
+if (key === 'e') {
+  if (typeof triggerActiveSkill === 'function') triggerActiveSkill(0);
+}
+if (key === 'p' && gameMode === 'double') {
+  if (typeof triggerActiveSkill === 'function') triggerActiveSkill(1);
+}
 if (key === 'w') setDirection(0, 'up');
 else if (key === 's') setDirection(0, 'down');
 else if (key === 'a') setDirection(0, 'left');
@@ -448,6 +740,70 @@ if (musicEnabled) { musicBtn.textContent = '🎵 音乐开'; musicBtn.classList.
 else { musicBtn.textContent = '🔇 音乐关'; musicBtn.classList.add('active-music'); stopBgm(); }
 });
 
+// ===== 数据统计按钮绑定 =====
+const statsBtnEl = document.getElementById('statsBtn');
+const statsModalEl = document.getElementById('statsModal');
+if (statsBtnEl && statsModalEl) {
+  statsBtnEl.addEventListener('click', () => { renderStats(); statsModalEl.classList.add('show'); });
+  document.getElementById('closeStats').addEventListener('click', () => statsModalEl.classList.remove('show'));
+  statsModalEl.addEventListener('click', (e) => { if (e.target === statsModalEl) statsModalEl.classList.remove('show'); });
+}
+
+// ===== 商城按钮绑定 =====
+const shopBtnEl = document.getElementById('shopBtn');
+if (shopBtnEl && shopModal) {
+  shopBtnEl.addEventListener('click', openShop);
+  document.getElementById('closeShop').addEventListener('click', () => shopModal.classList.remove('show'));
+  shopModal.addEventListener('click', (e) => { if (e.target === shopModal) shopModal.classList.remove('show'); });
+  document.querySelectorAll('.shop-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      currentShopTab = btn.dataset.tab;
+      renderShop();
+    });
+  });
+}
+
+// ===== 技能按钮（手机端） =====
+const skillBtnEl = document.getElementById('skillBtn');
+const skillCountEl = document.getElementById('skillCount');
+
+function updateSkillBtn() {
+  if (!skillBtnEl) return;
+  const p = snakes && snakes[0];
+  if (!p || gameMode !== 'single' || isGameOver) {
+    skillBtnEl.style.display = 'none';
+    return;
+  }
+  const skin = p.skinId;
+  let left = 0, emoji = '✨';
+  if (skin === 'she') { left = p.ghostLeft || 0; emoji = '🐍'; }
+  else if (skin === 'hu') { left = p.phantomLeft || 0; emoji = '🐯'; }
+  else if (skin === 'long') { left = p.longLeft || 0; emoji = '🐲'; }
+  else if (skin === 'yang') { left = p.yangLeft || 0; emoji = '🐑'; }
+  else { skillBtnEl.style.display = 'none'; return; }
+  skillBtnEl.firstChild.textContent = emoji;
+  if (left <= 0) skillBtnEl.classList.add('disabled');
+  else skillBtnEl.classList.remove('disabled');
+  skillBtnEl.style.display = '';
+  skillCountEl.textContent = left;
+}
+
+function triggerSkillFromButton() {
+  if (typeof triggerActiveSkill === 'function') triggerActiveSkill(0);
+}
+
+if (skillBtnEl) {
+  if (window.PointerEvent) {
+    skillBtnEl.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); triggerSkillFromButton(); });
+  } else {
+    skillBtnEl.addEventListener('touchstart', (e) => { e.preventDefault(); triggerSkillFromButton(); }, { passive: false });
+    skillBtnEl.addEventListener('mousedown', (e) => { e.preventDefault(); triggerSkillFromButton(); });
+  }
+}
+
+setInterval(updateSkillBtn, 300);
+window.__updateSkillBtn = updateSkillBtn;
+
 // ===== BGM 解锁 =====
 let bgmUnlocked = false;
 function unlockBgm() { if (bgmUnlocked) return; bgmUnlocked = true; if (musicEnabled) playBgm('menu'); }
@@ -485,6 +841,7 @@ document.getElementById('startBtn').textContent = '开始修炼';
 document.getElementById('startBtn').style.display = 'block';
 updateModeButtons();
 updateCatModeBtn();
+if (window.__updateSkillBtn) window.__updateSkillBtn();
 }, 300);
 }
 ASSET_KEYS.forEach(key => {

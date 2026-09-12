@@ -35,6 +35,7 @@ const dualP1Grid = document.getElementById('dualP1Grid');
 const dualP2Grid = document.getElementById('dualP2Grid');
 const dualNextBtn = document.getElementById('dualNextBtn');
 const closeDualSkinBtn = document.getElementById('closeDualSkin');
+const shopModal = document.getElementById('shopModal');
 
 const LOGICAL_SIZE = 600, GRID = 20, COLS = 30, ROWS = 30;
 const dpr = window.devicePixelRatio || 1;
@@ -48,11 +49,70 @@ let snakes = [];
 let food = { x: 0, y: 0 };
 let score = 0, highScore = 0;
 let maxLengthReached = 3;
+let maxComboReached = 0;
 let foodsEaten = 0;
 let survivalTime = 0;
 let fastEats = 0;
 let cornerEaten = new Set();
 let totalScoreAccum = 0;
+
+// ===== 商城 / 铜钱 / 道具 =====
+let coins = parseInt(localStorage.getItem(COINS_KEY) || '0');
+
+let inventory = (() => { try { return JSON.parse(localStorage.getItem(INVENTORY_KEY) || '{}'); } catch(e) { return {}; } })();
+let equippedItem = localStorage.getItem(EQUIPPED_KEY) || '';
+
+let inventoryP1 = (() => { try { return JSON.parse(localStorage.getItem(INVENTORY_P1_KEY) || '{}'); } catch(e) { return {}; } })();
+let inventoryP2 = (() => { try { return JSON.parse(localStorage.getItem(INVENTORY_P2_KEY) || '{}'); } catch(e) { return {}; } })();
+let equippedItemP1 = localStorage.getItem(EQUIPPED_P1_KEY) || '';
+let equippedItemP2 = localStorage.getItem(EQUIPPED_P2_KEY) || '';
+
+let thisRunHasLuopan = false;
+let thisRunHasLuopanP1 = false;
+let thisRunHasLuopanP2 = false;
+let thisRunRecordHintShown = false;
+
+function saveCoins() { try { localStorage.setItem(COINS_KEY, String(coins)); } catch(e) {} }
+function saveInventory() { try { localStorage.setItem(INVENTORY_KEY, JSON.stringify(inventory)); } catch(e) {} }
+function saveInventoryP1() { try { localStorage.setItem(INVENTORY_P1_KEY, JSON.stringify(inventoryP1)); } catch(e) {} }
+function saveInventoryP2() { try { localStorage.setItem(INVENTORY_P2_KEY, JSON.stringify(inventoryP2)); } catch(e) {} }
+
+// ===== 数据统计 =====
+let stats = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STATS_KEY) || '{}');
+    return {
+      totalGames: saved.totalGames || 0,
+      singleGames: saved.singleGames || 0,
+      doubleGames: saved.doubleGames || 0,
+      totalPlayTime: saved.totalPlayTime || 0,
+      totalFoodsEaten: saved.totalFoodsEaten || 0,
+      bestLength: saved.bestLength || 3,
+      bestCombo: saved.bestCombo || 0,
+      bestSurvivalTime: saved.bestSurvivalTime || 0,
+      bestFoodsEaten: saved.bestFoodsEaten || 0,
+      deaths: saved.deaths || { wall:0, self:0, other:0, cat:0, catBite:0, obstacle:0 }
+    };
+  } catch (e) {
+    return {
+      totalGames: 0, singleGames: 0, doubleGames: 0,
+      totalPlayTime: 0, totalFoodsEaten: 0,
+      bestLength: 3, bestCombo: 0, bestSurvivalTime: 0, bestFoodsEaten: 0,
+      deaths: { wall:0, self:0, other:0, cat:0, catBite:0, obstacle:0 }
+    };
+  }
+})();
+function saveStats() { try { localStorage.setItem(STATS_KEY, JSON.stringify(stats)); } catch (e) {} }
+function classifyDeathReason(reason) {
+  if (!reason) return null;
+  if (reason.includes('咬断')) return 'catBite';
+  if (reason.includes('野猫')) return 'cat';
+  if (reason.includes('撞墙')) return 'wall';
+  if (reason.includes('咬到自己')) return 'self';
+  if (reason.includes('撞到对方')) return 'other';
+  if (reason.includes('撞到石头')) return 'obstacle';
+  return null;
+}
 
 let rafId = null, loopActive = false, lastFrameTs = 0, accumulator = 0;
 let isPaused = false, isGameOver = false, isDying = false, speed = 160;
@@ -118,25 +178,37 @@ function saveAchievements() { localStorage.setItem(ACHIEVE_KEY, JSON.stringify(u
 
 const BASE_SPEED = 160, MIN_SPEED = 70;
 function calcSpeed() { const step = Math.floor(score/50); return Math.max(MIN_SPEED, BASE_SPEED - step*6); }
-function vibrate(pattern) { if (!navigator.vibrate) return; try { navigator.vibrate(pattern); } catch(e) {} }
+function vibrate(pattern) {
+  if (!navigator.vibrate) return;
+  try {
+    setTimeout(() => { try { navigator.vibrate(pattern); } catch(e) {} }, 0);
+  } catch (e) {}
+}
 
-// ===== 吃食物音效（MP3 版本） =====
-const eatSound1 = new Audio('./eat1.mp3');
-eatSound1.preload = 'auto';
-eatSound1.volume = 0.5;
-const eatSound2 = new Audio('./eat2.mp3');
-eatSound2.preload = 'auto';
-eatSound2.volume = 0.5;
+// ===== 吃食物音效（音频池） =====
+const EAT_POOL_SIZE = 6;
+const eatPool = { normal: [], special: [] };
+let eatPoolIdx = 0;
+(function initEatPool() {
+  for (let i = 0; i < EAT_POOL_SIZE; i++) {
+    const a1 = new Audio('./eat1.mp3'); a1.preload = 'auto'; a1.volume = 0.5;
+    const a2 = new Audio('./eat2.mp3'); a2.preload = 'auto'; a2.volume = 0.5;
+    eatPool.normal.push(a1);
+    eatPool.special.push(a2);
+  }
+})();
 
-function playEatSound(playerId, isSpecial) {
-try {
-const base = isSpecial ? eatSound2 : eatSound1;
-const snd = base.cloneNode();
-snd.volume = base.volume;
-snd.playbackRate = playerId === 'p2' ? 1.15 : 1.0;
-const p = snd.play();
-if (p) p.catch(() => {});
-} catch (e) {}
+function playEatSound(playerId, isSpecial, comboCount) {
+  try {
+    const pool = isSpecial ? eatPool.special : eatPool.normal;
+    const snd = pool[eatPoolIdx % EAT_POOL_SIZE];
+    eatPoolIdx++;
+    snd.currentTime = 0;
+    const comboPitch = 1 + Math.min((comboCount || 0), 10) * 0.05;
+    snd.playbackRate = (playerId === 'p2' ? 1.15 : 1.0) * comboPitch;
+    const p = snd.play();
+    if (p) p.catch(() => {});
+  } catch (e) {}
 }
 document.addEventListener('touchstart', () => { try { if (navigator.vibrate) navigator.vibrate(1); } catch(e) {} }, { once: true });
 
@@ -164,8 +236,45 @@ return {
   ghostTrail: [],
   foodsEaten: 0, maxLen: 3, survivalTime: 0, fastEats: 0,
   cornerEaten: new Set(),
-  skinId: skinId || 'default'
+  skinId: skinId || 'default',
+  comboCount: 0,
+  comboTimer: 0,
+  maxCombo: 0,
+  hasXuming: false,
+  xumingUsed: false,
+  invincibleUntil: 0,
+  speedMultiplier: 1,
+  niuShieldLeft: 0,
+  hasRevive: false,
+  reviveUsed: false,
+  ghostLeft: 0,
+  ghostMode: false,
+  ghostUntil: 0,
+  // 虎分身
+  phantomLeft: 0,
+  phantomUntil: 0,
+  phantomData: null,
+  // 龙炎爆
+  longLeft: 0,
+  longCdUntil: 0,
+  longHitCatCount: 0,
+  longFireUntil: 0,
+  longFireCells: null,
+  // 羊魂游
+  yangLeft: 0
 };
+}
+
+// ★ 皮肤被动初始化
+function applySkinPassive(p) {
+  if (!p) return;
+  if (p.skinId === 'tu') p.speedMultiplier = 1.1;
+  if (p.skinId === 'niu') p.niuShieldLeft = 3;
+  if (p.skinId === 'ma') { p.hasRevive = true; p.reviveUsed = false; }
+  if (p.skinId === 'she') { p.ghostLeft = 3; }
+  if (p.skinId === 'hu') { p.phantomLeft = 2; }
+  if (p.skinId === 'long') { p.longLeft = 2; }
+  if (p.skinId === 'yang') { p.yangLeft = 3; }
 }
 
 function startLoop() { stopLoop(); lastFrameTs=0; accumulator=0; loopActive=true; rafId=requestAnimationFrame(frame); }
@@ -204,6 +313,7 @@ if (scoreEl.parentElement) { const lbl = scoreEl.parentElement.querySelector('.l
 score2Stat.style.display = 'flex';
 score2El.textContent = '0';
 }
+snakes.forEach(p => applySkinPassive(p));
 score = 0; speed = BASE_SPEED;
 isPaused = false; isGameOver = false; isDying = false; particles = [];
 foodPulse = 0; shakeAmount = 0;
@@ -212,9 +322,82 @@ cat = null; catActive = false; catTrail = []; catBiteLosses = 0;
 specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 0;
 obstacles = []; portals = []; portalPairCounter = 0;
 maxLengthReached = 3; foodsEaten = 0; survivalTime = 0; fastEats = 0; cornerEaten = new Set();
+maxComboReached = 0;
+thisRunHasLuopan = false;
+thisRunHasLuopanP1 = false;
+thisRunHasLuopanP2 = false;
+thisRunRecordHintShown = false;  
 scoreEl.textContent = '0'; lengthEl.textContent = '3';
 placeFood(); overlay.classList.add('hidden');
 updateGameBgm(); renderAchievements();
+if (window.__updateSkillBtn) window.__updateSkillBtn();
+}
+
+function applyItemToPlayer(player, itemId, which) {
+  if (!player || !itemId) return null;
+  const item = SHOP_ITEMS.find(x => x.id === itemId);
+  if (!item) return null;
+
+  let inv;
+  if (which === 'single') inv = inventory;
+  else if (which === 'p1') inv = inventoryP1;
+  else inv = inventoryP2;
+
+  if (!inv[itemId] || inv[itemId] <= 0) return null;
+  inv[itemId]--;
+  if (inv[itemId] <= 0) delete inv[itemId];
+
+  if (which === 'single') saveInventory();
+  else if (which === 'p1') saveInventoryP1();
+  else saveInventoryP2();
+
+  if (itemId === 'fu') {
+    player.shield = true;
+  } else if (itemId === 'zhaocai') {
+    player.score += 30;
+    if (which === 'single') {
+      score = player.score;
+      scoreEl.textContent = player.score;
+    } else {
+      if (player.id === 'p1') scoreEl.textContent = player.score;
+      else score2El.textContent = player.score;
+    }
+  } else if (itemId === 'jifeng') {
+    player.speedBoost = 5000;
+  } else if (itemId === 'luopan') {
+    if (which === 'single') thisRunHasLuopan = true;
+    else if (which === 'p1') thisRunHasLuopanP1 = true;
+    else thisRunHasLuopanP2 = true;
+  } else if (itemId === 'xuming') {
+    player.hasXuming = true;
+    player.xumingUsed = false;
+  }
+  return item;
+}
+
+function applyEquippedItem() {
+  if (gameMode === 'single') {
+    if (!equippedItem) return;
+    const item = applyItemToPlayer(snakes[0], equippedItem, 'single');
+    equippedItem = '';
+    localStorage.removeItem(EQUIPPED_KEY);
+    if (item) showCheatToast('✨ 使用了「' + item.name + '」', 700);
+  } else {
+    const names = [];
+    if (equippedItemP1) {
+      const item = applyItemToPlayer(snakes[0], equippedItemP1, 'p1');
+      if (item) names.push('P1「' + item.name + '」');
+      equippedItemP1 = '';
+      localStorage.removeItem(EQUIPPED_P1_KEY);
+    }
+    if (equippedItemP2) {
+      const item = applyItemToPlayer(snakes[1], equippedItemP2, 'p2');
+      if (item) names.push('P2「' + item.name + '」');
+      equippedItemP2 = '';
+      localStorage.removeItem(EQUIPPED_P2_KEY);
+    }
+    if (names.length) showCheatToast('✨ 使用了 ' + names.join(' · '), 800);
+  }
 }
 
 function placeFood() {
@@ -307,7 +490,7 @@ if (obstacles.some(o=>o.x===catX&&o.y===catY)) continue;
 if (portals.some(p=>p.x===catX&&p.y===catY)) continue;
 valid = true;
 }
-cat = { x:catX, y:catY, dir:{x:0,y:0}, moveTimer:0 };
+cat = { x:catX, y:catY, dir:{x:0,y:0}, moveTimer:0, stunLeft:0 };
 catActive = true; catBiteLosses = 0;
 showCheatToast('🐱 野猫出现！小心尾巴！');
 }
@@ -315,32 +498,59 @@ showCheatToast('🐱 野猫出现！小心尾巴！');
 function updateCat() {
 if (!catActive || !cat || isPaused || isGameOver) return;
 if (gameMode === 'double') { catActive = false; cat = null; return; }
+
+// 猫被眩晕时，跳过移动
+if (cat.stunLeft > 0) {
+  cat.stunLeft--;
+  return;
+}
+
 cat.moveTimer++;
 if (cat.moveTimer < 2) return;
 cat.moveTimer = 0;
 const player = snakes[0];
 if (!player || !player.alive || !player.body || player.body.length === 0) return;
-const head = player.body[0];
-if (!head) return;
-if (head.x === cat.x && head.y === cat.y) {
-if (player.shield) { player.shield = false; showCheatToast('🛡️ 护盾抵挡了野猫！'); catActive=false; cat=null; catTrail=[]; return; }
-else { killPlayer(player, '被野猫正面抓住'); return; }
+
+// 判断目标：优先追幻影
+let targetHead = player.body[0];
+if (player.phantomData && performance.now() < player.phantomUntil && player.phantomData.body && player.phantomData.body[0]) {
+  targetHead = player.phantomData.body[0];
 }
-const dx = head.x-cat.x, dy = head.y-cat.y;
+if (!targetHead) return;
+
+if (targetHead.x === cat.x && targetHead.y === cat.y) {
+  if (player.phantomData && performance.now() < player.phantomUntil) {
+    // 猫碰到幻影，幻影消失
+    player.phantomUntil = 0;
+    player.phantomData = null;
+    showCheatToast('👻 幻影被猫击碎！', 700);
+    return;
+  }
+  if (player.shield) { player.shield = false; player.invincibleUntil = performance.now() + 1200; showCheatToast('🛡️ 护盾抵挡了野猫！', 700); catActive=false; cat=null; catTrail=[]; return; }
+  else { killPlayer(player, '被野猫正面抓住'); return; }
+}
+const dx = targetHead.x-cat.x, dy = targetHead.y-cat.y;
 let moveX=0, moveY=0;
 if (Math.abs(dx) >= Math.abs(dy)) moveX = dx>0?1:(dx<0?-1:0);
 else moveY = dy>0?1:(dy<0?-1:0);
 const newX = cat.x+moveX, newY = cat.y+moveY;
 if (newX>=0 && newX<COLS && newY>=0 && newY<ROWS) {
-if (!player.body.some(s=>s.x===newX&&s.y===newY) && !obstacles.some(o=>o.x===newX&&o.y===newY)) {
-cat.x=newX; cat.y=newY; cat.dir={x:moveX,y:moveY};
-}
+  const blockedByRealBody = player.body.some(s=>s.x===newX&&s.y===newY);
+  if (!blockedByRealBody && !obstacles.some(o=>o.x===newX&&o.y===newY)) {
+    cat.x=newX; cat.y=newY; cat.dir={x:moveX,y:moveY};
+  }
 }
 catTrail.push({x:cat.x,y:cat.y});
 if (catTrail.length > 6) catTrail.shift();
-if (head.x===cat.x && head.y===cat.y) {
-if (player.shield) { player.shield=false; showCheatToast('🛡️ 护盾抵挡了野猫！'); catActive=false; cat=null; catTrail=[]; return; }
-else { killPlayer(player, '被野猫正面抓住'); return; }
+if (targetHead.x===cat.x && targetHead.y===cat.y) {
+  if (player.phantomData && performance.now() < player.phantomUntil) {
+    player.phantomUntil = 0;
+    player.phantomData = null;
+    showCheatToast('👻 幻影被猫击碎！', 700);
+    return;
+  }
+  if (player.shield) { player.shield=false; player.invincibleUntil = performance.now() + 1200; showCheatToast('🛡️ 护盾抵挡了野猫！', 700); catActive=false; cat=null; catTrail=[]; return; }
+  else { killPlayer(player, '被野猫正面抓住'); return; }
 }
 if (player.body.length > 3) {
 for (let i=player.body.length-1; i>=3; i--) {
@@ -386,6 +596,47 @@ return true;
 
 function killPlayer(player, reason) {
 if (!player || !player.alive) return;
+
+// 续命丹优先
+if (player.hasXuming && !player.xumingUsed) {
+  player.xumingUsed = true;
+  player.score = Math.floor(player.score / 2);
+  if (player.id === 'p1') { if (gameMode === 'single') score = player.score; scoreEl.textContent = player.score; }
+  else { score2El.textContent = player.score; }
+  const startX = player.id === 'p1' ? (gameMode === 'single' ? 12 : 5) : 24;
+  const startY = player.id === 'p1' ? (gameMode === 'single' ? 15 : 5) : 24;
+  player.body = [{x:startX, y:startY}];
+  for (let i = 1; i <= 2; i++) player.body.push({ x: startX - i, y: startY });
+  player.dir = {x:1,y:0}; player.nextDir = {x:1,y:0};
+  player.shield = true;
+  player.invincibleUntil = performance.now() + 1500;
+  player.ghostTrail = [];
+  shakeAmount = 30;
+  vibrate([200,100,200]);
+  if (reason && reason.includes('野猫')) { catActive = false; cat = null; catTrail = []; catBiteLosses = 0; }
+  showCheatToast('💖 续命丹生效！原地复活，分数减半');
+  return;
+}
+
+// 马符咒·回春
+if (player.hasRevive && !player.reviveUsed) {
+  player.reviveUsed = true;
+  const startX = player.id === 'p1' ? (gameMode === 'single' ? 12 : 5) : 24;
+  const startY = player.id === 'p1' ? (gameMode === 'single' ? 15 : 5) : 24;
+  player.body = [{x:startX, y:startY}];
+  for (let i = 1; i <= 2; i++) player.body.push({ x: startX - i, y: startY });
+  player.dir = {x:1,y:0}; player.nextDir = {x:1,y:0};
+  player.invincibleUntil = performance.now() + 1500;
+  player.ghostTrail = [];
+  shakeAmount = 30;
+  vibrate([200,100,200]);
+  spawnParticles(startX, startY, '#66ff99');
+  spawnParticles(startX, startY, '#ffffff');
+  if (reason && reason.includes('野猫')) { catActive = false; cat = null; catTrail = []; catBiteLosses = 0; }
+  showCheatToast('🐴 马符咒·回春！原地复活，分数保留', 1400);
+  return;
+}
+
 player.alive = false;
 vibrate([500, 150, 500, 150, 500]);
 shakeAmount = 35;
@@ -404,17 +655,58 @@ else gameOver(reason + ' · 平局！');
 function gameOver(reason) {
 if (isGameOver) return;
 isGameOver = true; isDying = true;
-if (gameMode === 'single') { totalScoreAccum += score; }
-else { snakes.forEach(p => totalScoreAccum += (p.score || 0)); }
+
+const finalScore = gameMode === 'single' ? score : snakes.reduce((a,p)=>a+(p.score||0),0);
+
+// 🐭 鼠符咒 · 聚财
+let coinBonus = 0;
+if (gameMode === 'single' && boardSkinId === 'shu') coinBonus = 0.15;
+else if (gameMode === 'double' && (p1SkinId === 'shu' || p2SkinId === 'shu')) coinBonus = 0.15;
+
+const earnedCoins = Math.floor(finalScore / 10 * (1 + coinBonus));
+coins += earnedCoins;
+saveCoins();
+
+stats.totalGames++;
+if (gameMode === 'single') stats.singleGames++;
+else stats.doubleGames++;
+
+if (gameMode === 'single') {
+  totalScoreAccum += score;
+  if (snakes[0]) {
+    const p = snakes[0];
+    stats.totalPlayTime += Math.floor(p.survivalTime || 0);
+    stats.totalFoodsEaten += p.foodsEaten || 0;
+    stats.bestSurvivalTime = Math.max(stats.bestSurvivalTime, Math.floor(p.survivalTime || 0));
+    stats.bestFoodsEaten = Math.max(stats.bestFoodsEaten, p.foodsEaten || 0);
+    stats.bestLength = Math.max(stats.bestLength, p.maxLen || 3);
+    stats.bestCombo = Math.max(stats.bestCombo, p.maxCombo || 0);
+  }
+} else {
+  snakes.forEach(p => totalScoreAccum += (p.score || 0));
+  snakes.forEach(p => {
+    stats.totalPlayTime += Math.floor(p.survivalTime || 0);
+    stats.totalFoodsEaten += p.foodsEaten || 0;
+    stats.bestSurvivalTime = Math.max(stats.bestSurvivalTime, Math.floor(p.survivalTime || 0));
+    stats.bestFoodsEaten = Math.max(stats.bestFoodsEaten, p.foodsEaten || 0);
+    stats.bestLength = Math.max(stats.bestLength, p.maxLen || 3);
+    stats.bestCombo = Math.max(stats.bestCombo, p.maxCombo || 0);
+  });
+}
+const dtype = classifyDeathReason(reason);
+if (dtype) stats.deaths[dtype] = (stats.deaths[dtype] || 0) + 1;
+saveStats();
+
 saveAchievements(); checkAchievements();
 setTimeout(() => {
 isDying = false;
 stopLoop();
 overlayTitle.textContent = '修炼失败';
-overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && snakes[0] && snakes[0].body ? (' · 积分 '+score+' · 体长 '+snakes[0].body.length) : '');
+overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && snakes[0] && snakes[0].body ? (' · 积分 '+score+' · 体长 '+snakes[0].body.length) : '') + ' · 🪙 +' + earnedCoins;
 startBtn.textContent = '再次入世';
 overlay.classList.remove('hidden');
 playBgm('menu');
+if (window.__updateSkillBtn) window.__updateSkillBtn();
 setTimeout(() => {
 const el = document.getElementById('aiComment');
 if (el && typeof generateAIComment === 'function') {
@@ -436,19 +728,50 @@ if (pairsToRemove.size > 0) portals = portals.filter(p => !pairsToRemove.has(p.p
 if (!catActive && catModeEnabled && gameMode === 'single' && score >= CAT_ACTIVATE_SCORE) spawnCat();
 const alivePlayers = snakes.filter(p => p.alive);
 if (alivePlayers.length === 0) return;
+const nowTs = performance.now();
 for (let idx = 0; idx < snakes.length; idx++) {
 const p = snakes[idx];
 if (!p.alive) continue;
 if (!p.body || p.body.length === 0) continue;
 snake = p.body; direction = p.dir; nextDirection = p.nextDir; currentPlayer = p;
 let curSpeed = speed;
-if (p.speedBoost > 0) curSpeed = speed * 0.6;
+if (p.speedMultiplier && p.speedMultiplier > 1) curSpeed = curSpeed / p.speedMultiplier;
+if (p.speedBoost > 0) curSpeed = curSpeed * 0.6;
 p.survivalTime += curSpeed / 1000;
+if (p.comboTimer > 0) {
+  p.comboTimer -= speed;
+  if (p.comboTimer <= 0) { p.comboTimer = 0; p.comboCount = 0; }
+}
+// 幽灵模式结束判定
+if (p.ghostMode && nowTs >= p.ghostUntil) {
+  p.ghostMode = false;
+  if (p.body && p.body[0]) {
+    const hx = p.body[0].x, hy = p.body[0].y;
+    if (obstacles.some(o => o.x === hx && o.y === hy)) {
+      obstacles = obstacles.filter(o => !(o.x === hx && o.y === hy));
+      spawnParticles(hx, hy, '#a06cd5');
+    }
+  }
+  if (window.__updateSkillBtn) window.__updateSkillBtn();
+}
+// 幻影结束判定
+if (p.phantomData && nowTs >= p.phantomUntil) {
+  p.phantomData = null;
+  if (window.__updateSkillBtn) window.__updateSkillBtn();
+}
+// 炎爆视觉结束
+if (p.longFireCells && nowTs >= p.longFireUntil) {
+  p.longFireCells = null;
+}
+const isGhost = p.ghostMode && nowTs < p.ghostUntil;
 direction = { ...nextDirection };
 if (!snake[0]) continue;
 const head = { x: snake[0].x + direction.x, y: snake[0].y + direction.y };
+const isInvincible = nowTs < (p.invincibleUntil || 0);
+
 if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
-if (p.shield) { p.shield = false; showCheatToast('🛡️ 护盾抵挡了墙壁！'); p.dir = direction; p.nextDir = nextDirection; continue; }
+if (isInvincible) { p.dir = direction; p.nextDir = nextDirection; continue; }
+if (p.shield) { p.shield = false; p.invincibleUntil = nowTs + 1200; showCheatToast('🛡️ 护盾抵挡了墙壁！', 700); p.dir = direction; p.nextDir = nextDirection; continue; }
 else { killPlayer(p, '撞墙了'); continue; }
 }
 const enteredPortal = portals.find(pt => pt.x === head.x && pt.y === head.y);
@@ -463,15 +786,31 @@ showCheatToast('🌀 传送门穿越！');
 }
 }
 if (obstacles.some(o => o.x === head.x && o.y === head.y)) {
-if (p.shield) {
+if (isGhost) {
+  spawnParticles(head.x, head.y, '#a06cd5');
+} else if (isInvincible) { p.dir = direction; p.nextDir = nextDirection; continue; }
+else if (p.shield) {
 p.shield = false;
+p.invincibleUntil = nowTs + 1200;
 obstacles = obstacles.filter(o => !(o.x === head.x && o.y === head.y));
-showCheatToast('🛡️ 护盾撞碎了石头！');
+showCheatToast('🛡️ 护盾撞碎了石头！', 700);
+p.dir = direction; p.nextDir = nextDirection; continue;
+} else if (p.niuShieldLeft > 0) {
+p.niuShieldLeft--;
+obstacles = obstacles.filter(o => !(o.x === head.x && o.y === head.y));
+shakeAmount = 22;
+vibrate([80,40,80]);
+spawnParticles(head.x, head.y, '#ffaa00');
+spawnParticles(head.x, head.y, '#ff6b6b');
+showCheatToast('🐮 牛符咒·铁壁！撞碎石头（剩余 ' + p.niuShieldLeft + ' 次）', 1000);
 p.dir = direction; p.nextDir = nextDirection; continue;
 } else { killPlayer(p, '撞到石头了'); continue; }
 }
 if (snake.some(s => s.x === head.x && s.y === head.y)) {
-if (p.shield) { p.shield = false; showCheatToast('🛡️ 护盾抵挡了自咬！'); p.dir = direction; p.nextDir = nextDirection; continue; }
+if (isGhost) {
+  spawnParticles(head.x, head.y, '#a06cd5');
+} else if (isInvincible) { p.dir = direction; p.nextDir = nextDirection; continue; }
+else if (p.shield) { p.shield = false; p.invincibleUntil = nowTs + 1200; showCheatToast('🛡️ 护盾抵挡了自咬！', 700); p.dir = direction; p.nextDir = nextDirection; continue; }
 else { killPlayer(p, '咬到自己了'); continue; }
 }
 let hitOther = false;
@@ -482,17 +821,35 @@ if (!other.alive || !other.body) continue;
 if (other.body.some(s => s.x === head.x && s.y === head.y)) { hitOther = true; break; }
 }
 if (hitOther) {
-if (p.shield) { p.shield = false; showCheatToast('🛡️ 护盾抵挡了对方！'); p.dir = direction; p.nextDir = nextDirection; continue; }
+if (isGhost) {
+  spawnParticles(head.x, head.y, '#a06cd5');
+} else if (isInvincible) { p.dir = direction; p.nextDir = nextDirection; continue; }
+else if (p.shield) { p.shield = false; p.invincibleUntil = nowTs + 1200; showCheatToast('🛡️ 护盾抵挡了对方！', 700); p.dir = direction; p.nextDir = nextDirection; continue; }
 else { killPlayer(p, '撞到对方了'); continue; }
 }
 snake.unshift(head);
 let ateSomething = false;
 if (head.x === food.x && head.y === food.y) {
 ateSomething = true; p.foodsEaten++;
-vibrate([100,40,100]); shakeAmount = 18;
-playEatSound(p.id, false);
+playEatSound(p.id, false, p.comboCount);
+shakeAmount = 18;
+vibrate([100,40,100]);
+p.comboCount++;
+p.comboTimer = (p.skinId === 'tu') ? (COMBO_WINDOW + 500) : COMBO_WINDOW;
+p.maxCombo = Math.max(p.maxCombo, p.comboCount);
+const multiplier = getComboMultiplier(p.comboCount);
+
+// 🐯 虎符咒 · 阴阳
+if (p.skinId === 'hu' && p.comboCount > 0 && p.comboCount % 5 === 0) {
+  p.score += 30;
+  showCheatToast('🐯 虎符咒·阴阳！连击 ' + p.comboCount + ' · +30 分', 900);
+  if (gameMode === 'single') score = p.score;
+  if (p.id === 'p1') scoreEl.textContent = p.score; else score2El.textContent = p.score;
+}
+
 let baseScore = 10;
 if (p.speedBoost > 0) baseScore *= 2;
+baseScore = Math.floor(baseScore * multiplier);
 p.score += baseScore;
 if (gameMode === 'single') score = p.score;
 if (p.id === 'p1') scoreEl.textContent = p.score; else score2El.textContent = p.score;
@@ -500,10 +857,13 @@ p.maxLen = Math.max(p.maxLen, snake.length);
 const isCorner = (food.x===0||food.x===COLS-1) && (food.y===0||food.y===ROWS-1);
 if (isCorner) p.cornerEaten.add(food.x+','+food.y);
 if (curSpeed <= MIN_SPEED+5) p.fastEats++;
-showScorePop(food.x, food.y, p.id);
+showScorePop(food.x, food.y, p.id, baseScore, multiplier);
 spawnParticles(food.x, food.y, '#ff6b6b'); spawnParticles(food.x, food.y, '#00f5d4');
 placeFood();
-if (!specialFood && Math.random() < 0.35) spawnSpecialFood();
+let specialChance = 0.35;
+if (gameMode === 'single' && thisRunHasLuopan) specialChance = 0.7;
+else if (gameMode === 'double' && (thisRunHasLuopanP1 || thisRunHasLuopanP2)) specialChance = 0.7;
+if (!specialFood && Math.random() < specialChance) spawnSpecialFood();
 if (p.foodsEaten % 3 === 0) trySpawnObstacle();
 if (p.foodsEaten % 15 === 0) trySpawnPortal();
 if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
@@ -511,19 +871,38 @@ if (gameMode === 'double' && p.score >= WIN_SCORE) { const other = snakes.find(x
 lengthEl.textContent = p.body.length;
 } else if (specialFood && head.x === specialFood.x && head.y === specialFood.y) {
 ateSomething = true; p.foodsEaten++;
-vibrate([100,50,100]); shakeAmount = 22;
-playEatSound(p.id, true);
+playEatSound(p.id, true, p.comboCount);
+shakeAmount = 22;
+vibrate([100,50,100]);
+p.comboCount++;
+p.comboTimer = (p.skinId === 'tu') ? (COMBO_WINDOW + 500) : COMBO_WINDOW;
+p.maxCombo = Math.max(p.maxCombo, p.comboCount);
+const multiplier = getComboMultiplier(p.comboCount);
+
+// 🐯 虎符咒 · 阴阳
+if (p.skinId === 'hu' && p.comboCount > 0 && p.comboCount % 5 === 0) {
+  p.score += 30;
+  showCheatToast('🐯 虎符咒·阴阳！连击 ' + p.comboCount + ' · +30 分', 900);
+  if (gameMode === 'single') score = p.score;
+  if (p.id === 'p1') scoreEl.textContent = p.score; else score2El.textContent = p.score;
+}
+
 let baseScore = 10;
 if (p.speedBoost > 0) baseScore *= 2;
 if (specialFood.type === 'gold') { baseScore = 20; showCheatToast('💰 金元宝！积分双倍！'); }
-else if (specialFood.type === 'speed') { p.speedBoost = 5000; showCheatToast('⚡ 加速药水！速度提升，分数翻倍！'); }
+else if (specialFood.type === 'speed') {
+  const duration = (p.skinId === 'tu') ? 8000 : 5000;
+  p.speedBoost = duration;
+  showCheatToast('⚡ 加速药水！' + (duration/1000) + ' 秒加速，分数翻倍！');
+}
 else if (specialFood.type === 'shield') { p.shield = true; showCheatToast('🛡️ 护盾铃铛！免疫一次死亡！'); }
 else if (specialFood.type === 'shrink') { const newLen = Math.max(3, Math.floor(snake.length/2)); p.body = snake.slice(0, newLen); snake = p.body; lengthEl.textContent = p.body.length; showCheatToast('🧪 缩小药水！身体缩短一半！'); }
+baseScore = Math.floor(baseScore * multiplier);
 p.score += baseScore;
 if (gameMode === 'single') score = p.score;
 if (p.id === 'p1') scoreEl.textContent = p.score; else score2El.textContent = p.score;
 p.maxLen = Math.max(p.maxLen, p.body.length);
-showScorePop(specialFood.x, specialFood.y, p.id);
+showScorePop(specialFood.x, specialFood.y, p.id, baseScore, multiplier);
 spawnParticles(specialFood.x, specialFood.y, '#ffaa00'); spawnParticles(specialFood.x, specialFood.y, '#ffffff');
 if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
 if (gameMode === 'double' && p.score >= WIN_SCORE) { const other = snakes.find(x=>x.id!==p.id); if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分'); }
@@ -533,7 +912,7 @@ if (!ateSomething && snake.length > 0) snake.pop();
 p.body = snake; p.dir = direction; p.nextDir = nextDirection;
 if (snake.length > 0) {
 p.ghostTrail.push(snake.map(s => ({x:s.x, y:s.y})));
-if (p.ghostTrail.length > 22) p.ghostTrail.shift();
+if (p.ghostTrail.length > 8) p.ghostTrail.shift();
 }
 }
 if (snakes[0]) {
@@ -542,6 +921,7 @@ foodsEaten = snakes[0].foodsEaten;
 fastEats = snakes[0].fastEats;
 survivalTime = Math.floor(snakes[0].survivalTime);
 cornerEaten = snakes[0].cornerEaten;
+maxComboReached = snakes[0].maxCombo;
 }
 updateCat();
 if (catActive && cat && isCatTrapped()) {
@@ -563,11 +943,31 @@ if (gameMode === 'double' && aliveNow.length <= 1) {
 if (aliveNow.length === 1) gameOver('对手已阵亡 · ' + aliveNow[0].id.toUpperCase() + ' 获胜！');
 else gameOver('双方阵亡 · 平局！');
 }
+// 🏆 破纪录提示
+if (gameMode === 'single' && highScore > 0 && !thisRunRecordHintShown) {
+  const gap = highScore - score;
+  if (gap > 0 && gap <= 100) {
+    thisRunRecordHintShown = true;
+    showRecordHint(gap);
+  }
+}
 }
 
-function showScorePop(gx, gy, playerId) {
+function showRecordHint(gap) {
+  const el = document.getElementById('recordHint');
+  if (!el) return;
+  el.textContent = '🏆 还有 ' + gap + ' 分就破记录啦！';
+  el.classList.add('show');
+  clearTimeout(el._hideTimer);
+  el._hideTimer = setTimeout(() => { el.classList.remove('show'); }, 3500);
+}
+
+
+function showScorePop(gx, gy, playerId, score, multiplier) {
 const pop = document.createElement('div');
-pop.className = 'score-pop'; pop.textContent = '+10';
+pop.className = 'score-pop';
+pop.textContent = '+' + score + (multiplier > 1 ? ' ×' + multiplier : '');
+if (multiplier > 1) pop.classList.add('combo');
 pop.style.left = ((gx+0.5)/COLS*100)+'%';
 pop.style.top = ((gy+0.5)/ROWS*100)+'%';
 if (playerId === 'p2') pop.style.color = '#f15bb5';
@@ -595,6 +995,53 @@ portals.forEach(p => drawPortal(p));
 foodPulse += 0.09;
 drawFood(food, boardSkin);
 if (specialFood) drawSpecialFood(specialFood);
+
+// 龙炎爆视觉
+snakes.forEach(p => {
+  if (!p.longFireCells || performance.now() >= p.longFireUntil) return;
+  const now = performance.now();
+  const life = Math.max(0, (p.longFireUntil - now) / 400);
+  p.longFireCells.forEach((cell, i) => {
+    const fx = cell.x * GRID + GRID/2;
+    const fy = cell.y * GRID + GRID/2;
+    const glow = ctx.createRadialGradient(fx, fy, 2, fx, fy, GRID * 1.1);
+    glow.addColorStop(0, 'rgba(255,180,0,' + (0.9*life) + ')');
+    glow.addColorStop(0.5, 'rgba(255,80,0,' + (0.6*life) + ')');
+    glow.addColorStop(1, 'rgba(255,80,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(fx, fy, GRID * 1.1, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,200,' + (0.8*life) + ')';
+    ctx.beginPath(); ctx.arc(fx, fy, GRID * 0.28, 0, Math.PI * 2); ctx.fill();
+  });
+});
+
+// 虎幻影
+snakes.forEach(p => {
+  if (!p.phantomData || performance.now() >= p.phantomUntil) return;
+  const now = performance.now();
+  const remain = (p.phantomUntil - now) / 5000;
+  const alpha = 0.25 + 0.35 * remain;
+  const ph = p.phantomData;
+  if (!ph.body) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ph.body.forEach((seg, i) => {
+    const x = seg.x * GRID, y = seg.y * GRID;
+    const cx = x + GRID/2, cy = y + GRID/2;
+    const grad = ctx.createRadialGradient(cx, cy, 1, cx, cy, GRID*0.6);
+    grad.addColorStop(0, '#ffcc66');
+    grad.addColorStop(1, '#ff8800');
+    ctx.fillStyle = grad;
+    if (i === 0) {
+      ctx.beginPath(); ctx.arc(cx, cy, GRID*0.5, 0, Math.PI*2); ctx.fill();
+    } else {
+      roundRect(ctx, x + 3, y + 3, GRID - 6, GRID - 6, 5);
+      ctx.fill();
+    }
+  });
+  ctx.restore();
+});
+
 snakes.forEach((p, idx) => {
 if (!p.alive || !p.body || p.body.length === 0) return;
 snake = p.body;
@@ -602,6 +1049,28 @@ drawPlayer(p, idx);
 });
 snakes.forEach(p => { if (p.alive && p.shield && p.body && p.body[0]) drawShield(p); });
 if (catActive && cat) drawCat();
+snakes.forEach((p) => {
+  if (!p.alive || p.comboCount < 2 || !p.body || !p.body[0]) return;
+  const head = p.body[0];
+  const hx = head.x * GRID + GRID/2;
+  const hy = head.y * GRID + GRID/2;
+  const color = getComboColor(p.comboCount);
+  const ratio = Math.max(0, p.comboTimer / COMBO_WINDOW);
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 20px Nunito, sans-serif';
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 14;
+  ctx.fillText('×' + p.comboCount, hx, hy - GRID * 1.15);
+  ctx.shadowBlur = 0;
+  const barW = 44, barH = 4;
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.fillRect(hx - barW/2, hy - GRID * 0.95, barW, barH);
+  ctx.fillStyle = color;
+  ctx.fillRect(hx - barW/2, hy - GRID * 0.95, barW * ratio, barH);
+  ctx.restore();
+});
 particles.forEach(p => { ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill(); });
 ctx.globalAlpha = 1;
 ctx.restore();
@@ -751,7 +1220,6 @@ ctx.beginPath(); ctx.moveTo(-5,-1); ctx.lineTo(5,-1); ctx.lineTo(5,9); ctx.quadr
 ctx.restore();
 }
 
-// ★★★ 绘制玩家：鼠头鼠身牛身已还原 ★★★
 function drawPlayer(p, idx) {
 if (!p || !p.body || p.body.length === 0) return;
 const pSkinId = p.skinId || 'default';
@@ -763,11 +1231,15 @@ const ghostColor = p.id === 'p1' ? getGhostColorP1(p.score) : getGhostColorP2(p.
 p.ghostTrail.forEach((gs, index) => {
 if (!gs || gs.length === 0) return;
 const t = (index+1)/p.ghostTrail.length;
-const alpha = t*0.35; const scale = t;
+const tSq = t * t;
+const alpha = tSq * 0.9; const scale = tSq;
 ctx.globalAlpha = alpha;
 ctx.globalCompositeOperation = 'lighter';
-ctx.strokeStyle = 'rgba('+ghostColor.r+','+ghostColor.g+','+ghostColor.b+',1)';
-ctx.lineWidth = GRID*(0.18 + 0.32*scale);
+const col = 'rgba('+ghostColor.r+','+ghostColor.g+','+ghostColor.b+',1)';
+ctx.strokeStyle = col;
+ctx.shadowColor = col;
+ctx.shadowBlur = 28 * scale;
+ctx.lineWidth = GRID*(0.08 + 0.62*scale);
 ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 ctx.beginPath();
 gs.forEach((seg, i) => {
@@ -777,8 +1249,20 @@ if (i===0) ctx.moveTo(gx,gy);
 else { const prev = gs[i-1]; if (!prev) return; const px = prev.x*GRID+GRID/2; const py = prev.y*GRID+GRID/2; const midX = (px+gx)/2; const midY = (py+gy)/2; ctx.quadraticCurveTo(px,py,midX,midY); }
 });
 ctx.stroke();
+ctx.shadowBlur = 0;
+ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+ctx.lineWidth = GRID*(0.04 + 0.22*scale);
+ctx.stroke();
 ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
 });
+
+const isInvincibleNow = performance.now() < (p.invincibleUntil || 0);
+const isGhostNow = p.ghostMode && performance.now() < p.ghostUntil;
+if (isGhostNow) {
+  ctx.globalAlpha = 0.4 + Math.sin(performance.now()/80)*0.2;
+} else if (isInvincibleNow) {
+  ctx.globalAlpha = 0.35 + Math.sin(performance.now()/60)*0.25;
+}
 
 p.body.forEach((seg, i) => {
 if (!seg) return;
@@ -786,20 +1270,14 @@ const x = seg.x*GRID, y = seg.y*GRID, isHead = i===0;
 const cx = x+GRID/2, cy = y+GRID/2;
 if (isHead) {
 if (pSkinId === 'shu') {
-// 耳朵
 ctx.fillStyle='#e8c9a0'; ctx.beginPath(); ctx.ellipse(cx-9,cy-8,7,8,-0.3,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx+9,cy-8,7,8,0.3,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#f5d5b5'; ctx.beginPath(); ctx.ellipse(cx-9,cy-8,4,5,-0.3,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx+9,cy-8,4,5,0.3,0,Math.PI*2); ctx.fill();
-// 头部
 const hg = ctx.createRadialGradient(cx-3,cy-3,2,cx,cy,12); hg.addColorStop(0,'#f0e0c8'); hg.addColorStop(1,'#d4b896');
 ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(cx,cy,11,0,Math.PI*2); ctx.fill();
-// 腮红
 ctx.fillStyle='rgba(255,160,140,0.45)'; ctx.beginPath(); ctx.ellipse(cx-7,cy+3,3.5,2.5,0,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(cx+7,cy+3,3.5,2.5,0,0,Math.PI*2); ctx.fill();
-// 眼睛
 ctx.fillStyle='#4a3020'; ctx.beginPath(); ctx.arc(cx-4,cy-1,2.8,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx+4,cy-1,2.8,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(cx-3.2,cy-1.8,1.1,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx+4.8,cy-1.8,1.1,0,Math.PI*2); ctx.fill();
-// 鼻子
 ctx.fillStyle='#e89a8a'; ctx.beginPath(); ctx.ellipse(cx,cy+4,2.2,1.6,0,0,Math.PI*2); ctx.fill();
-// 胡须
 ctx.strokeStyle='rgba(80,50,30,0.55)'; ctx.lineWidth=1.1; ctx.beginPath(); ctx.moveTo(cx-3,cy+3); ctx.lineTo(cx-12,cy+1); ctx.moveTo(cx-3,cy+5); ctx.lineTo(cx-11,cy+6); ctx.moveTo(cx+3,cy+3); ctx.lineTo(cx+12,cy+1); ctx.moveTo(cx+3,cy+5); ctx.lineTo(cx+11,cy+6); ctx.stroke();
 } else if (pSkinId === 'niu') {
 const STROKE='#6b3f22'; ctx.lineJoin='round';
@@ -822,7 +1300,6 @@ else if (pSkinId === 'yang') { ctx.save(); ctx.translate(cx,cy); if (direction.x
 else { const headGlow = ctx.createRadialGradient(cx,cy,2,cx,cy,GRID*1.1); const glowCol = p.id === 'p2' ? 'rgba(241,91,181,' : 'rgba(0,245,212,'; headGlow.addColorStop(0, glowCol + '0.4)'); headGlow.addColorStop(1, glowCol + '0)'); ctx.fillStyle=headGlow; ctx.fillRect(x-5,y-5,GRID+10,GRID+10); const headGrad = ctx.createLinearGradient(x,y,x+GRID,y+GRID); headGrad.addColorStop(0, headColors[0]); headGrad.addColorStop(0.5, headColors[1]); headGrad.addColorStop(1, headColors[2]); ctx.fillStyle=headGrad; roundRect(ctx,x+1.5,y+1.5,GRID-3,GRID-3,7); ctx.fill(); }
 } else {
 if (pSkinId === 'shu') {
-// 老鼠身体：完整版（圆身 + 耳朵 + 眼睛 + 腮红）
 const scx=x+GRID/2, scy=y+GRID/2;
 ctx.fillStyle='#f0e0c8'; ctx.beginPath(); ctx.arc(scx,scy,8.5,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#e8c9a0'; ctx.beginPath(); ctx.ellipse(scx-6,scy-5,3.5,4,-0.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(scx+6,scy-5,3.5,4,0.2,0,Math.PI*2); ctx.fill();
@@ -830,7 +1307,6 @@ ctx.fillStyle='#5a4030'; ctx.beginPath(); ctx.arc(scx-3,scy-1,1.6,0,Math.PI*2); 
 ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(scx-2.5,scy-1.5,0.6,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(scx+3.5,scy-1.5,0.6,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#e89a8a'; ctx.beginPath(); ctx.arc(scx,scy+2.5,1.3,0,Math.PI*2); ctx.fill();
 } else if (pSkinId === 'niu') {
-// 牛身体：完整奶瓶（瓶身 + 奶嘴盖 + 奶嘴头 + 奶液渐变）
 const scx=x+GRID/2, scy=y+GRID/2;
 let angle = -Math.PI/2;
 if (i>0 && p.body[i-1]) { const prev = p.body[i-1]; angle = Math.atan2(prev.y-seg.y, prev.x-seg.x); }
@@ -860,6 +1336,8 @@ const inset = 2.5+t*1.8; roundRect(ctx, x+inset, y+inset, GRID-inset*2, GRID-ins
 }
 }
 });
+
+if (isInvincibleNow || isGhostNow) ctx.globalAlpha = 1;
 }
 
 function getGhostColorP1(s) {
@@ -898,7 +1376,8 @@ if (!cat) return;
 const catCX = cat.x*GRID+GRID/2, catCY = cat.y*GRID+GRID/2;
 ctx.save(); ctx.globalAlpha = 0.35;
 const catGlow = ctx.createRadialGradient(catCX,catCY,4,catCX,catCY,GRID*1.8);
-catGlow.addColorStop(0,'rgba(255,80,80,0.7)'); catGlow.addColorStop(1,'rgba(255,80,80,0)');
+catGlow.addColorStop(0, cat.stunLeft > 0 ? 'rgba(160,108,213,0.9)' : 'rgba(255,80,80,0.7)');
+catGlow.addColorStop(1, 'rgba(255,80,80,0)');
 ctx.fillStyle = catGlow; ctx.beginPath(); ctx.arc(catCX,catCY,GRID*1.8,0,Math.PI*2); ctx.fill();
 ctx.restore();
 catTrail.forEach((ct, ci) => {
@@ -909,6 +1388,20 @@ ctx.beginPath(); ctx.arc(ct.x*GRID+GRID/2, ct.y*GRID+GRID/2, GRID*0.4, 0, Math.P
 });
 ctx.globalAlpha = 1;
 ctx.save(); ctx.translate(catCX, catCY);
+if (cat.stunLeft > 0) {
+  // 眩晕圈
+  const rot = performance.now() / 200;
+  ctx.strokeStyle = 'rgba(200,140,255,0.9)';
+  ctx.lineWidth = 2;
+  for (let k = 0; k < 3; k++) {
+    const a = rot + k * (Math.PI * 2 / 3);
+    const sx = Math.cos(a) * GRID * 0.7;
+    const sy = Math.sin(a) * GRID * 0.35 - GRID * 0.6;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 3, 0, Math.PI*2);
+    ctx.stroke();
+  }
+}
 if (cat.dir.x === 1) ctx.scale(-1,1);
 else if (cat.dir.x === -1) {}
 else if (cat.dir.y === -1) ctx.rotate(Math.PI/2);
@@ -937,4 +1430,128 @@ else if (dir==='left' && p.dir.x===0) p.nextDir={x:-1,y:0};
 else if (dir==='right' && p.dir.x===0) p.nextDir={x:1,y:0};
 }
 
-function startGame() { startBtn.style.display='block'; overlay.classList.remove('paused'); stopLoop(); initGame(); startLoop(); }
+// ★ 统一主动技能入口
+function triggerActiveSkill(playerIdx) {
+  const p = snakes[playerIdx];
+  if (!p || !p.alive) return;
+  if (isPaused || isGameOver) return;
+  const now = performance.now();
+
+  // 蛇：幽灵模式
+  if (p.skinId === 'she') {
+    if (p.ghostLeft <= 0) return;
+    if (p.ghostMode && now < p.ghostUntil) return;
+    p.ghostLeft--;
+    p.ghostMode = true;
+    p.ghostUntil = now + 3000;
+    p.invincibleUntil = p.ghostUntil;
+    vibrate([60,30,60]);
+    if (p.body && p.body[0]) spawnParticles(p.body[0].x, p.body[0].y, '#a06cd5');
+    showCheatToast('🐍 蛇符咒·隐踪！幽灵模式 3 秒（剩余 ' + p.ghostLeft + ' 次）', 1000);
+    if (window.__updateSkillBtn) window.__updateSkillBtn();
+    return;
+  }
+
+  // 虎：分身
+  if (p.skinId === 'hu') {
+    if (p.phantomLeft <= 0) return;
+    if (p.phantomData && now < p.phantomUntil) return;
+    p.phantomLeft--;
+    // 找空位放幻影（地图中心附近随机）
+    let placed = false, px = 15, py = 15;
+    for (let t = 0; t < 50 && !placed; t++) {
+      px = 3 + Math.floor(Math.random() * (COLS - 6));
+      py = 3 + Math.floor(Math.random() * (ROWS - 6));
+      if (obstacles.some(o => o.x === px && o.y === py)) continue;
+      if (p.body.some(s => s.x === px && s.y === py)) continue;
+      if (cat && cat.x === px && cat.y === py) continue;
+      placed = true;
+    }
+    const phantomBody = [{x: px, y: py}];
+    for (let i = 1; i <= 2; i++) phantomBody.push({ x: px - i, y: py });
+    p.phantomData = { body: phantomBody };
+    p.phantomUntil = now + 5000;
+    vibrate([60,30,60]);
+    spawnParticles(px, py, '#ffcc66');
+    showCheatToast('🐯 虎符咒·分身！幻影出现 5 秒（剩余 ' + p.phantomLeft + ' 次）', 1000);
+    if (window.__updateSkillBtn) window.__updateSkillBtn();
+    return;
+  }
+
+  // 龙：炎爆
+  if (p.skinId === 'long') {
+    if (p.longLeft <= 0) return;
+    if (now < p.longCdUntil) {
+      const left = Math.ceil((p.longCdUntil - now) / 1000);
+      showCheatToast('🐲 炎爆冷却中（' + left + ' 秒）', 800);
+      return;
+    }
+    p.longLeft--;
+    p.longCdUntil = now + 5000;
+    const head = p.body[0];
+    const dir = p.dir;
+    const cells = [];
+    for (let i = 1; i <= 5; i++) {
+      const fx = head.x + dir.x * i;
+      const fy = head.y + dir.y * i;
+      if (fx < 0 || fx >= COLS || fy < 0 || fy >= ROWS) break;
+      cells.push({x: fx, y: fy});
+      // 清除石头
+      if (obstacles.some(o => o.x === fx && o.y === fy)) {
+        obstacles = obstacles.filter(o => !(o.x === fx && o.y === fy));
+        spawnParticles(fx, fy, '#ffaa00');
+      }
+      // 击中猫
+      if (catActive && cat && cat.x === fx && cat.y === fy) {
+        cat.stunLeft = (cat.stunLeft || 0) + 1;
+        p.longHitCatCount = (p.longHitCatCount || 0) + 1;
+        spawnParticles(fx, fy, '#ff4400');
+        if (p.longHitCatCount >= 2) {
+          catActive = false;
+          cat = null;
+          catTrail = [];
+          p.score += 100;
+          if (gameMode === 'single') score = p.score;
+          scoreEl.textContent = p.score;
+          if (gameMode === 'single' && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
+          showCheatToast('🐲 龙符咒·炎爆！两次全中，野猫被烧死 +100 分！', 1600);
+        } else {
+          showCheatToast('🐲 炎爆击中野猫！猫停 1 次移动（已击中 ' + p.longHitCatCount + '/2）', 1200);
+        }
+      }
+    }
+    p.longFireCells = cells;
+    p.longFireUntil = now + 400;
+    vibrate([80,30,80]);
+    shakeAmount = 15;
+    showCheatToast('🐲 龙符咒·炎爆！（剩余 ' + p.longLeft + ' 次）', 1000);
+    if (window.__updateSkillBtn) window.__updateSkillBtn();
+    return;
+  }
+
+  // 羊：魂游
+  if (p.skinId === 'yang') {
+    if (p.yangLeft <= 0) return;
+    p.yangLeft--;
+    vibrate([60,30,60]);
+    if (catActive && cat) {
+      cat.stunLeft = (cat.stunLeft || 0) + 3;
+      spawnParticles(cat.x, cat.y, '#c8a8e8');
+      showCheatToast('🐑 羊符咒·魂游！眩晕野猫 3 次移动（剩余 ' + p.yangLeft + ' 次）', 1200);
+    } else {
+      p.invincibleUntil = now + 3000;
+      if (p.body && p.body[0]) spawnParticles(p.body[0].x, p.body[0].y, '#c8a8e8');
+      showCheatToast('🐑 羊符咒·魂游！无敌 3 秒（剩余 ' + p.yangLeft + ' 次）', 1200);
+    }
+    if (window.__updateSkillBtn) window.__updateSkillBtn();
+    return;
+  }
+}
+
+// 兼容旧调用名
+function triggerGhostSkill(playerIdx) { triggerActiveSkill(playerIdx); }
+
+window.__triggerGhostSkill = triggerGhostSkill;
+window.__triggerActiveSkill = triggerActiveSkill;
+
+function startGame() { startBtn.style.display='block'; overlay.classList.remove('paused'); stopLoop(); initGame(); applyEquippedItem(); startLoop(); if (window.__updateSkillBtn) window.__updateSkillBtn(); }
