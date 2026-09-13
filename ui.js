@@ -907,7 +907,7 @@ const loadingText = document.getElementById('loadingText');
 loadingScreen.style.display = 'flex';
 document.getElementById('overlay').classList.add('hidden');
 let loadedCount = 0;
-const total = ASSET_KEYS.length;
+const total = 1; // 只需要等 atlas.png（atlas.js 已通过 <script> 同步加载）
 let finished = false;
 function updateProgress() { const pct = Math.floor(loadedCount / total * 100); progressBar.style.width = pct + '%'; loadingText.textContent = pct + '%'; }
 function finish() {
@@ -932,23 +932,14 @@ updateCatModeBtn();
 if (window.__updateSkillBtn) window.__updateSkillBtn();
 }, 300);
 }
-ASSET_KEYS.forEach(key => {
-let img;
-if (key === 'cat_head') img = CAT_ASSET;
-else if (key.startsWith('rab_')) img = RABBIT_ASSETS[key.replace('rab_', '')];
-else if (key.startsWith('dragon_')) img = DRAGON_ASSETS[key.replace('dragon_', '')];
-else if (key.startsWith('snake_')) img = SNAKE_ASSETS[key.replace('snake_', '')];
-else if (key.startsWith('horse_')) img = HORSE_ASSETS[key.replace('horse_', '')];
-else if (key.startsWith('sheep_')) img = SHEEP_ASSETS[key.replace('sheep_', '')];
-else img = TIGER_ASSETS[key];
 let done = false;
-const complete = () => { if (done) return; done = true; loadedCount++; updateProgress(); if (loadedCount === total) finish(); };
-const timer = setTimeout(() => { console.warn('资源加载超时:', key); complete(); }, 5000);
-img.onload = () => { clearTimeout(timer); complete(); };
-img.onerror = () => { console.warn('资源加载失败:', key); clearTimeout(timer); complete(); };
-img.src = ASSET_URLS[key];
-});
+const complete = () => { if (done) return; done = true; loadedCount++; updateProgress(); finish(); };
+const timer = setTimeout(() => { console.warn('atlas.png 加载超时'); complete(); }, 8000);
+atlasImg.onload = () => { clearTimeout(timer); complete(); };
+atlasImg.onerror = () => { console.warn('atlas.png 加载失败'); clearTimeout(timer); complete(); };
+atlasImg.src = ATLAS_IMAGE_URL;
 }
+
 Object.values(BGM).forEach(url => { const pre = new Audio(); pre.preload = 'auto'; pre.src = url; });
 audio.src = BGM.menu;
 startLoadingScreen();

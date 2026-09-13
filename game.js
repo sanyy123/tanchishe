@@ -174,6 +174,78 @@ const SNAKE_ASSETS = { head: new Image(), tail: new Image(), food: new Image(), 
 const HORSE_ASSETS = { head: new Image(), tail: new Image(), food: new Image(), decor: new Image() };
 const SHEEP_ASSETS = { head: new Image(), tail: new Image(), food: new Image(), decor: new Image() };
 
+
+// ===== 图集 =====
+const atlasImg = new Image();
+let atlasData = (typeof window !== 'undefined' && window.ATLAS_DATA) || null;
+
+// 从图集裁剪单帧（处理 trim 偏移）
+function drawAtlasFrame(frame, cx, cy, dpx) {
+if (!frame || !atlasImg.complete || !atlasImg.naturalWidth) return false;
+const fr = frame.frame;
+if (!fr) return false;
+const src = frame.spriteSourceSize || fr;
+const orig = frame.sourceSize || { w: fr.w, h: fr.h };
+const s = dpx / orig.w;
+const drawW = fr.w * s;
+const drawH = fr.h * s;
+const offsetX = (src.x + src.w / 2 - orig.w / 2) * s;
+const offsetY = (src.y + src.h / 2 - orig.h / 2) * s;
+ctx.drawImage(
+atlasImg,
+fr.x, fr.y, fr.w, fr.h,
+cx - drawW / 2 + offsetX,
+cy - drawH / 2 + offsetY,
+drawW, drawH
+);
+return true;
+}
+
+// 按 key 从图集查找并绘制（兼容带/不带 .png 的 key）
+function drawFromAtlas(key, cx, cy, dpx) {
+if (!atlasData || !atlasData.frames) return false;
+const frame = atlasData.frames[key + '.png'] || atlasData.frames[key];
+if (!frame) return false;
+return drawAtlasFrame(frame, cx, cy, dpx);
+}
+
+// 给每个老 Image 对象挂上对应的图集 key，让 drawImageHelper 能反查
+function buildAtlasKeyMap() {
+const map = {
+'head': TIGER_ASSETS.head,
+'body': TIGER_ASSETS.body,
+'food': TIGER_ASSETS.food,
+'leaf': TIGER_ASSETS.leaf,
+'rab_head': RABBIT_ASSETS.head,
+'rab_body': RABBIT_ASSETS.body,
+'rab_food': RABBIT_ASSETS.food,
+'rab_paw': RABBIT_ASSETS.paw,
+'dragon_head': DRAGON_ASSETS.head,
+'dragon_decor': DRAGON_ASSETS.decor,
+'dragon_food': DRAGON_ASSETS.food,
+'dragon_tail': DRAGON_ASSETS.tail,
+'snake_head': SNAKE_ASSETS.head,
+'snake_tail': SNAKE_ASSETS.tail,
+'snake_food': SNAKE_ASSETS.food,
+'snake_drop': SNAKE_ASSETS.drop,
+'snake_leaf': SNAKE_ASSETS.leaf,
+'horse_head': HORSE_ASSETS.head,
+'horse_tail': HORSE_ASSETS.tail,
+'horse_food': HORSE_ASSETS.food,
+'horse_decor': HORSE_ASSETS.decor,
+'sheep_head': SHEEP_ASSETS.head,
+'sheep_tail': SHEEP_ASSETS.tail,
+'sheep_food': SHEEP_ASSETS.food,
+'sheep_decor': SHEEP_ASSETS.decor,
+'cat_head': CAT_ASSET
+};
+Object.entries(map).forEach(([key, img]) => {
+if (img) img._atlasKey = key;
+});
+}
+buildAtlasKeyMap();
+
+
 const audio = new Audio(); audio.loop = true; audio.volume = 0.45; audio.preload = 'auto';
 audio.addEventListener('ended', () => { if (musicEnabled && currentBgmKey) { audio.currentTime = 0; audio.play().catch(()=>{}); } });
 audio.addEventListener('error', () => { if (musicEnabled && currentBgmKey) { clearTimeout(bgmRetryTimer); bgmRetryTimer = setTimeout(() => { const url = BGM[currentBgmKey]; if (url) { audio.src = url; audio.play().catch(()=>{}); } }, 1500); } });
@@ -226,6 +298,9 @@ function playEatSound(playerId, isSpecial, comboCount) {
 document.addEventListener('touchstart', () => { try { if (navigator.vibrate) navigator.vibrate(1); } catch(e) {} }, { once: true });
 
 function drawImageHelper(img, cx, cy, dpx) {
+// 优先从图集绘制
+if (img && img._atlasKey && drawFromAtlas(img._atlasKey, cx, cy, dpx)) return true;
+// 回退到原 Image 对象（图集没加载成功时）
 if (!img || !img.complete || !img.naturalWidth) return false;
 const s = dpx / img.naturalWidth;
 const w = img.naturalWidth * s, h = img.naturalHeight * s;
@@ -1468,8 +1543,25 @@ function togglePause() {
 if (isGameOver) { startGame(); return; }
 if (!loopActive && !isPaused) { startGame(); return; }
 isPaused = !isPaused;
-if (isPaused) { stopLoop(); playBgm('menu'); overlay.classList.add('paused'); overlayTitle.textContent='暂时闭关'; overlayMsg.textContent='按空格继续修炼'; startBtn.style.display='none'; overlay.classList.remove('hidden'); updateRecordHint(); }
-else { overlay.classList.add('hidden'); overlay.classList.remove('paused'); startBtn.style.display='block'; updateGameBgm(); startLoop(); }
+const backBtn = document.getElementById('backToMenuBtn');
+if (isPaused) {
+  stopLoop();
+  playBgm('menu');
+  overlay.classList.add('paused');
+  overlayTitle.textContent = '暂时闭关';
+  overlayMsg.textContent = '按空格继续修炼';
+  startBtn.style.display = 'none';
+  if (backBtn) backBtn.style.display = 'block';
+  overlay.classList.remove('hidden');
+  updateRecordHint();
+} else {
+  overlay.classList.add('hidden');
+  overlay.classList.remove('paused');
+  startBtn.style.display = 'block';
+  if (backBtn) backBtn.style.display = 'none';
+  updateGameBgm();
+  startLoop();
+}
 }
 
 function setDirection(playerIdx, dir) {
@@ -1642,3 +1734,28 @@ async function submitLeaderboardScore(seedId, playerName, score, length) {
     console.warn('排行榜提交失败:', e);
   }
 }
+// ===== 暂停时 · 返回主菜单 =====
+document.addEventListener('DOMContentLoaded', () => {
+  const backBtn = document.getElementById('backToMenuBtn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      const el = document.getElementById('globalLoading');
+      if (el) {
+        const txt = document.getElementById('globalLoadingText');
+        const bar = document.getElementById('globalLoadingProgress');
+        if (txt) txt.textContent = '🏠 返回主菜单...';
+        el.classList.remove('hidden');
+        if (bar) {
+          bar.style.width = '0%';
+          requestAnimationFrame(() => {
+            bar.style.width = '60%';
+            setTimeout(() => { bar.style.width = '100%'; }, 250);
+          });
+        }
+        setTimeout(() => { window.location.reload(); }, 650);
+      } else {
+        window.location.reload();
+      }
+    });
+  }
+});

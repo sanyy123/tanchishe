@@ -895,3 +895,30 @@ if (mazeLoadingBar) {
 setTimeout(() => {
   if (mazeLoadingEl) mazeLoadingEl.classList.add('hidden');
 }, 600);
+// ===== 选择关卡弹窗 · 返回主菜单 =====
+document.addEventListener('DOMContentLoaded', () => {
+  const levelBackBtn = document.getElementById('levelBackToMenuBtn');
+  if (levelBackBtn) {
+    levelBackBtn.addEventListener('click', () => {
+      stopMazeLoop();
+      if (countdownTimer) clearInterval(countdownTimer);
+      const el = document.getElementById('mazeLoading');
+      if (el) {
+        const h2 = el.querySelector('h2');
+        if (h2) h2.textContent = '🏠 返回主菜单...';
+        el.classList.remove('hidden');
+        const bar = document.getElementById('mazeLoadingProgress');
+        if (bar) {
+          bar.style.width = '0%';
+          requestAnimationFrame(() => {
+            bar.style.width = '60%';
+            setTimeout(() => { bar.style.width = '100%'; }, 250);
+          });
+        }
+        setTimeout(() => { window.location.href = 'index.html'; }, 650);
+      } else {
+        window.location.href = 'index.html';
+      }
+    });
+  }
+});

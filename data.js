@@ -55,6 +55,7 @@ const SHOP_ITEMS = [
 
 // ===== 图片 URL =====
 const ASSET_KEYS = ['head','body','food','leaf','rab_head','rab_body','rab_food','rab_paw','dragon_head','dragon_decor','dragon_food','dragon_tail','snake_head','snake_tail','snake_food','snake_drop','snake_leaf','horse_head','horse_tail','horse_food','horse_decor','sheep_head','sheep_tail','sheep_food','sheep_decor','cat_head'];
+const ATLAS_IMAGE_URL = './assets/atlas.png';
 const ASSET_URLS = {
 head:'https://image.arityflow.top/uploads/2026/09/6aa356deba88b8.21233887_b9e60b5e.png',
 body:'https://image.arityflow.top/uploads/2026/09/6aa356deba26b9.46998108_9a8ed4b8.png',
