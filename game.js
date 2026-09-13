@@ -999,8 +999,13 @@ function accumulateInnAffinity() {
   // 跨过节点时提示（100/200/300）
   const tierBefore = getInnTier(before);
   const tierAfter = getInnTier(after);
-  if (tierAfter > tierBefore) {
-    const name = INN_CHARACTERS[skinId].name;
+  const name = INN_CHARACTERS[skinId].name;
+  if (tierAfter === 3 && tierBefore < 3) {
+    // ★ 满 300，获得客栈徽章
+    setTimeout(() => {
+      showCheatToast('🏅 恭喜！' + name + ' 与你结为挚友，获得客栈徽章！', 2800);
+    }, 800);
+  } else if (tierAfter > tierBefore) {
     const tierName = INN_TIER_NAMES[tierAfter];
     setTimeout(() => {
       showCheatToast('🏮 ' + name + ' 对你的好感度达到「' + tierName + '」！', 2000);
@@ -1129,8 +1134,9 @@ const dtype = classifyDeathReason(reason);
 if (dtype) stats.deaths[dtype] = (stats.deaths[dtype] || 0) + 1;
 saveStats();
 
-saveAchievements(); checkAchievements(); checkTitles();
-accumulateInnAffinity();   // ★ 客栈好感度
+saveAchievements(); checkAchievements();
+accumulateInnAffinity();   // ★ 先累加好感度
+checkTitles();             // ★ 再检查称号（含客栈徽章）
 
 setTimeout(() => {
   isDying = false;

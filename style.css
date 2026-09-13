@@ -1149,3 +1149,61 @@ canvas { display: block; background: var(--bg-base); width: 100%; height: 100%; 
   z-index: 1;
 }
 .inn-door-transition.opening .door-light { opacity: 1; }
+
+/* ==========================================================================
+   ★ 客栈徽章称号（tier-inn）—— 暖金色调，呼应客栈
+   ========================================================================== */
+.title-badge.tier-inn {
+  background: linear-gradient(135deg, rgba(255,153,102,0.22), rgba(255,204,0,0.18));
+  color: #ffb366;
+  border-color: rgba(255,153,102,0.6);
+  text-shadow: 0 0 10px rgba(255,153,102,0.9);
+  box-shadow: 0 0 18px rgba(255,153,102,0.4);
+  animation: innBadgeShimmer 2.8s ease-in-out infinite;
+}
+@keyframes innBadgeShimmer {
+  0%, 100% { filter: brightness(1); box-shadow: 0 0 18px rgba(255,153,102,0.4); }
+  50%      { filter: brightness(1.25); box-shadow: 0 0 24px rgba(255,204,0,0.6); }
+}
+
+.title-section-title.tier-inn {
+  background: linear-gradient(90deg, #ff9966, #ffcc00, #ff9966);
+  background-size: 200% auto;
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  animation: titleRainbow 3s linear infinite;
+}
+
+.title-card.tier-inn.equipped {
+  border-color: rgba(255,153,102,0.65);
+  border-left-color: #ff9966;
+  background: linear-gradient(90deg, rgba(255,153,102,0.16), rgba(255,204,0,0.06));
+  box-shadow: 0 0 22px rgba(255,153,102,0.3);
+}
+
+.title-toast.tier-inn {
+  border-color: rgba(255,153,102,0.6);
+  box-shadow: 0 15px 40px rgba(255,153,102,0.3);
+}
+.title-toast.tier-inn .tt-text h4 { color: #ff9966; }
+.title-toast.tier-inn .tt-text p {
+  background: linear-gradient(90deg, #ff9966, #ffcc00);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+
+/* ==========================================================================
+   ★ 客栈页面：木屋门口的徽章图标
+   ========================================================================== */
+.room-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 1.1rem;
+  filter: drop-shadow(0 0 8px rgba(255,204,0,0.9));
+  animation: roomBadgeFloat 2.5s ease-in-out infinite alternate;
+  z-index: 5;
+  pointer-events: none;
+}
+@keyframes roomBadgeFloat {
+  from { transform: translateY(0) rotate(-6deg); }
+  to   { transform: translateY(-3px) rotate(6deg); }
+}

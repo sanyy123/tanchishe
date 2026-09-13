@@ -89,6 +89,7 @@ function renderRooms() {
         '<div class="room-house">' +
           '<span class="room-emoji">' + char.emoji + '</span>' +
           '<div class="room-body"></div>' +
+          (aff >= INN_MAX_AFFINITY ? '<span class="room-badge">🏅</span>' : '') +
         '</div>' +
         '<div class="room-name">' + char.name + '</div>' +
         '<div class="room-title">' + (isUnlocked ? char.title : '🔒 未解锁') + '</div>' +
@@ -156,7 +157,7 @@ function openRoomModal(char) {
       need: 300,
       icon: '🌟',
       title: '皮肤觉醒 · ' + char.awakening.name,
-      body: char.awakening.desc + '（觉醒功能开发中，敬请期待）'
+      body: char.awakening.desc
     });
   }
   let html = '';

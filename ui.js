@@ -1389,7 +1389,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // 设计原则：按难度排序展示，已解锁的可以点击佩戴/取消，未解锁的显示进度条。
 // 佩戴状态直接写 localStorage，刷新后保留。
 
-const TITLE_TIER_ORDER = ['bronze', 'silver', 'gold', 'diamond', 'legend'];
+const TITLE_TIER_ORDER = ['bronze', 'silver', 'gold', 'diamond', 'legend', 'inn'];
 
 function renderTitles() {
   const listEl = document.getElementById('titleList');
