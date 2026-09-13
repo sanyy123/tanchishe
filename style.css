@@ -980,3 +980,172 @@ canvas { display: block; background: var(--bg-base); width: 100%; height: 100%; 
   .title-current { padding: 12px 16px; }
   .title-list { padding: 12px; }
 }
+/* ==========================================================================
+   🏮 江湖客栈 · 推门按钮
+   --------------------------------------------------------------------------
+   位置：主界面右下角，和左下角的模式按钮对称。
+   形态：一扇小木门，门框 + 门板分离，hover 时门板微微缝开。
+   点击：门板向左旋开 + 按钮整体缩隐 → JS 接管跳转。
+   ========================================================================== */
+.inn-door-btn {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 26;
+  width: 92px;
+  height: 92px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 0.25s var(--ease-out);
+}
+.inn-door-btn:hover { transform: translateY(-3px); }
+.inn-door-btn:active { transform: translateY(0) scale(0.94); }
+
+/* 门框：深木色，带内阴影，做出"门洞"感 */
+.inn-door-frame {
+  position: relative;
+  width: 56px;
+  height: 68px;
+  border-radius: 8px 8px 4px 4px;
+  background:
+    linear-gradient(180deg, #2b1a10 0%, #1a0f08 100%);
+  box-shadow:
+    inset 0 0 0 2px #6b4a2a,
+    inset 0 0 0 4px #3a2616,
+    0 4px 14px rgba(0,0,0,0.55);
+  overflow: hidden;
+  perspective: 200px;
+}
+/* 门板：暖木色，带木纹与门钉，初始关闭 */
+.inn-door-panel {
+  position: absolute;
+  inset: 4px;
+  border-radius: 4px 4px 2px 2px;
+  background:
+    repeating-linear-gradient(90deg,
+      #a8713f 0px, #a8713f 3px,
+      #8c5b32 3px, #8c5b32 4px),
+    linear-gradient(180deg, #b07a45 0%, #7a4e28 100%);
+  background-blend-mode: multiply;
+  transform-origin: left center;
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.4s;
+  box-shadow: inset -2px 0 4px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,220,160,0.15);
+}
+/* 门钉：两颗小圆点 */
+.inn-door-panel::before,
+.inn-door-panel::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ffe1a0, #8a5a20);
+  box-shadow: 0 1px 1px rgba(0,0,0,0.5);
+}
+.inn-door-panel::before { top: 14px; }
+.inn-door-panel::after  { bottom: 14px; }
+
+/* 悬停：门板微微缝开一道缝，透出暖光，暗示"里面有人在等你" */
+.inn-door-btn:hover .inn-door-panel { transform: rotateY(-22deg); }
+/* 点击推门动画：门板完全打开 + 按钮整体收缩淡出 */
+.inn-door-btn.opening .inn-door-panel { transform: rotateY(-95deg); opacity: 0.85; }
+.inn-door-btn.opening { transform: scale(0.85); opacity: 0; transition: transform 0.5s ease, opacity 0.5s ease; }
+
+/* 门缝里透出的暖光（用一个伪元素挂在门框上） */
+.inn-door-frame::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 4px 4px 2px 2px;
+  background: radial-gradient(ellipse at center, rgba(255,196,110,0.9), rgba(255,150,60,0) 70%);
+  opacity: 0;
+  transition: opacity 0.35s ease 0.15s;
+  pointer-events: none;
+}
+.inn-door-btn:hover .inn-door-frame::after { opacity: 0.55; }
+.inn-door-btn.opening .inn-door-frame::after { opacity: 1; }
+
+/* 底部标签 */
+.inn-door-label {
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 0.68rem;
+  letter-spacing: 1px;
+  color: #ffcc00;
+  text-shadow: 0 0 10px rgba(255,204,0,0.6);
+  white-space: nowrap;
+}
+
+/* 手机端缩小 */
+@media (max-width: 640px) {
+  .inn-door-btn { width: 74px; height: 74px; right: 6px; bottom: 6px; }
+  .inn-door-frame { width: 46px; height: 56px; }
+  .inn-door-label { font-size: 0.6rem; }
+}
+
+/* ==========================================================================
+   🏮 推门过渡动画 —— 点击客栈时，棋盘区两扇门从中间滑开
+   ========================================================================== */
+.inn-door-transition {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  pointer-events: none;
+  overflow: hidden;
+  border-radius: calc(var(--r-lg) - 4px);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.inn-door-transition.active { opacity: 1; }
+
+.door-half {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 51%;
+  background:
+    repeating-linear-gradient(90deg, #a8713f 0px, #a8713f 7px, #8c5b32 7px, #8c5b32 9px),
+    linear-gradient(180deg, #b07a45 0%, #7a4e28 100%);
+  background-blend-mode: multiply;
+  box-shadow: inset 0 0 60px rgba(0,0,0,0.55), inset 0 0 0 3px #6b4a2a;
+  transition: transform 0.5s cubic-bezier(0.6, 0, 0.3, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+}
+.door-half-left  { left: 0;  border-right: 3px solid #3a2616; }
+.door-half-right { right: 0; border-left:  3px solid #3a2616; }
+
+/* 门钉装饰 */
+.door-half::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ffe1a0, #8a5a20);
+  box-shadow: 0 0 8px rgba(255,200,100,0.6);
+}
+
+.inn-door-transition.opening .door-half-left  { transform: translateX(-100%); }
+.inn-door-transition.opening .door-half-right { transform: translateX(100%); }
+
+/* 门后透出的金光 */
+.door-light {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, rgba(255,225,160,0.95) 0%, rgba(255,150,60,0.55) 40%, rgba(0,0,0,0) 80%);
+  opacity: 0;
+  transition: opacity 0.5s ease 0.1s;
+  z-index: 1;
+}
+.inn-door-transition.opening .door-light { opacity: 1; }

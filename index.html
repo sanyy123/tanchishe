@@ -47,6 +47,12 @@
 <p class="loading-text" id="loadingText">0%</p>
 </div>
 </div>
+<!-- 推门过渡动画（点击客栈时触发） -->
+<div class="inn-door-transition" id="innDoorTransition" aria-hidden="true">
+  <div class="door-half door-half-left"></div>
+  <div class="door-half door-half-right"></div>
+  <div class="door-light"></div>
+</div>
 <div id="overlay">
 <h2 id="overlayTitle">十二生肖闯江湖</h2>
 <p id="overlayMsg">准备好踏入江湖了吗？</p>
@@ -60,6 +66,13 @@
 <button class="mode-btn" id="modeCoop" data-mode="coop">💞 合作</button>
 <button class="mode-btn" id="modeSeed" data-mode="seed">🌱 挑战</button>
 <button class="mode-btn" id="modeMaze" data-mode="maze">🗺️ 迷宫</button>
+</div>
+<button class="inn-door-btn" id="innDoorBtn" title="走进客栈" aria-label="走进客栈">
+  <span class="inn-door-frame">
+    <span class="inn-door-panel"></span>
+  </span>
+  <span class="inn-door-label">走进客栈</span>
+</button>
 </div>
 </div>
 <div class="pause-hint">空格 · 暂停</div>

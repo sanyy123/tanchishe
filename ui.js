@@ -34,15 +34,43 @@ renderSkins(); draw();
 showCheatToast('🐉 520 作弊成功 · 全部皮肤已解锁！');
 }
 function cheatUnlockAll() {
-ACHIEVEMENTS.forEach(a => { if (!unlocked.includes(a.id)) unlocked.push(a.id); });
-saveAchievements(); renderAchievements(); renderSkins(); draw();
-showCheatToast('✨ 1314 作弊成功 · 全部皮肤 + 成就已解锁！');
+  // 1) 解锁全部成就
+  ACHIEVEMENTS.forEach(a => { if (!unlocked.includes(a.id)) unlocked.push(a.id); });
+  saveAchievements();
+
+  // 2) 解锁全部皮肤（作弊皮肤集合）
+  Object.values(SKINS).forEach(s => { if (s.unlockId) cheatSkins.add(s.unlockId); });
+  SM.setJSON('snakeCheatSkins', [...cheatSkins]);
+
+  // 3) 解锁全部称号
+  const allTitleIds = TITLES.map(t => t.id);
+  unlockedTitles = [...new Set([...unlockedTitles, ...allTitleIds])];
+  SM.setJSON(TITLES_KEY, unlockedTitles);
+
+  // 4) 好感度全满
+  const maxAff = {};
+  Object.keys(INN_CHARACTERS).forEach(k => { maxAff[k] = INN_MAX_AFFINITY; });
+  SM.setJSON(INN_AFFINITY_KEY, maxAff);
+
+  // 5) 刷新 UI
+  renderAchievements();
+  renderSkins();
+  if (typeof renderTitles === 'function') renderTitles();
+  draw();
+
+  showCheatToast('✨ 1314 作弊成功 · 皮肤 + 成就 + 称号 + 好感度 全解锁！', 2200);
 }
 
-// ==================== ★ AI 评语配置（智谱 + 代理） ★ ====================
-const AI_API_KEY  = '691e8784c6954ae9be22fe6a49bba291.FNecmlca4jQOQoH6';
-const AI_BASE_URL = 'https://zhipu.wange5232.workers.dev/v4';
-const AI_MODEL    = 'GLM-4-Flash';
+// ★ 单独解锁全部好感度（作弊码 521）
+function cheatUnlockAffinity() {
+  const maxAff = {};
+  Object.keys(INN_CHARACTERS).forEach(k => { maxAff[k] = INN_MAX_AFFINITY; });
+  SM.setJSON(INN_AFFINITY_KEY, maxAff);
+  showCheatToast('💗 521 作弊成功 · 全部生肖好感度已满！', 2000);
+}
+
+// ==================== ★ AI 评语配置（从 data.js 统一读取）★ ====================
+// AI_API_KEY / AI_BASE_URL / AI_MODEL 已在 data.js 中定义，此处不再重复声明
 
 const AI_SYSTEM_PROMPT = [
 '你是"小江湖"，是十二生肖闯江湖客栈的老板娘，性格古灵精怪、说话带江湖气。',
@@ -736,6 +764,48 @@ if (modeMazeBtn) {
     }
   });
 }
+
+// 🏮 江湖客栈入口（棋盘区推门动画 → 加载遮罩 → 跳转）
+const innDoorBtn = document.getElementById('innDoorBtn');
+if (innDoorBtn) {
+  innDoorBtn.addEventListener('click', () => {
+    if (innDoorBtn.classList.contains('opening')) return;
+    innDoorBtn.classList.add('opening');
+
+    const dt = document.getElementById('innDoorTransition');
+    if (dt) {
+      // 两扇门合上覆盖棋盘，然后向两侧滑开，露出金光
+      dt.classList.add('active');
+      // 双 rAF 确保 transition 生效
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          dt.classList.add('opening');
+        });
+      });
+      // 动画播完（约 650ms）后跳转
+      setTimeout(() => {
+        const el = document.getElementById('globalLoading');
+        const txt = document.getElementById('globalLoadingText');
+        const bar = document.getElementById('globalLoadingProgress');
+        if (el && txt && bar) {
+          txt.textContent = '🏮 正在走进客栈...';
+          el.classList.remove('hidden');
+          bar.style.width = '0%';
+          requestAnimationFrame(() => {
+            bar.style.width = '60%';
+            setTimeout(() => { bar.style.width = '100%'; }, 250);
+          });
+          setTimeout(() => { window.location.href = 'inn.html'; }, 650);
+        } else {
+          window.location.href = 'inn.html';
+        }
+      }, 650);
+    } else {
+      // 没找到过渡元素就直接跳
+      window.location.href = 'inn.html';
+    }
+  });
+}
 // 🌱 种子局入口
 const modeSeedBtn = document.getElementById('modeSeed');
 if (modeSeedBtn) {
@@ -871,6 +941,7 @@ if (e.key >= '0' && e.key <= '9') {
 cheatBuffer += e.key;
 if (cheatBuffer.length > 6) cheatBuffer = cheatBuffer.slice(-6);
 if (cheatBuffer.endsWith('520')) { cheatUnlockSkins(); cheatBuffer=''; }
+else if (cheatBuffer.endsWith('521')) { cheatUnlockAffinity(); cheatBuffer=''; }
 else if (cheatBuffer.endsWith('1314')) { cheatUnlockAll(); cheatBuffer=''; }
 }
 });

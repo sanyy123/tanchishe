@@ -91,6 +91,12 @@ const SHOP_ITEMS = [
 // （原 image.arityflow.top 图床链接已移除，备份见 素材备份/原始图床链接.json）
 const ATLAS_IMAGE_URL = './assets/atlas.png';
 
+// ===== AI 配置（智谱 GLM，通过 Cloudflare Worker 代理）=====
+// 换 key 只改这里，ui.js 和 inn.js 都从这里读
+const AI_API_KEY  = '691e8784c6954ae9be22fe6a49bba291.FNecmlca4jQOQoH6';
+const AI_BASE_URL = 'https://zhipu.wange5232.workers.dev/v4';
+const AI_MODEL    = 'glm-4-Flash';
+
 // ===== BGM =====
 const BGM = { menu:'https://soundimage.org/wp-content/uploads/2020/10/Arcade-Quirkiness.mp3', stage0:'https://soundimage.org/wp-content/uploads/2017/07/Arcade-Puzzler.mp3', stage1:'https://soundimage.org/wp-content/uploads/2021/05/More-Coin-Op-Chaos.mp3', stage2:'https://soundimage.org/wp-content/uploads/2022/01/Technocade.mp3' };
 
@@ -134,7 +140,8 @@ const GUIDE_DATA = [
 { id: 'obstacle', icon: '🚧', title: '障碍与传送门', content: '<h4>🚧 障碍与传送门</h4><p>当设置里 <span class="hl3">🚧 障碍</span> 按钮开启时，随着分数上升，地图上会随机出现石头和传送门。</p><div class="card"><div class="title">🪨 石头</div><div class="desc">单局分数达到 <span class="hl">150 分</span> 后开始出现。石头会<span class="hl">阻挡蛇和猫</span>的移动，食物和特殊物品也不会生成在石头上。撞到石头会死亡（护盾可以抵挡一次）。</div></div><div class="card"><div class="title">🌀 传送门</div><div class="desc">单局分数达到 <span class="hl">400 分</span> 后开始出现，出现频率比石头低。传送门<span class="hl">成对出现</span>，颜色相同。蛇头从<span class="hl">一个</span>传送门进入，会从<span class="hl">另一个</span>传送门出来。传送门存在时间约 15 秒。</div></div>' },
 { id: 'skin', icon: '🎨', title: '皮肤与成就', content: '<h4>🎨 皮肤系统</h4><p>通过达成特定成就，可以解锁十二生肖皮肤。点击顶部“皮肤”按钮查看已解锁的皮肤。</p><ul><li>鼠：积分达到 30</li><li>牛：积分达到 70</li><li>虎：积分达到 130</li><li>兔：积分达到 200</li><li>龙：积分达到 300</li><li>蛇：体长达到 12</li><li>马：积分达到 450</li><li>羊：积分达到 600</li><li>猴：单局吃掉 20 个食物</li><li>鸡：体长达到 18</li><li>狗：积分达到 900</li><li>猪：积分达到 1300</li></ul><h4>🏆 成就系统</h4><p>点击顶部“成就”按钮查看所有成就及进度。解锁成就会有弹窗提示。</p><h4>✨ 皮肤技能</h4><p>每个十二生肖皮肤都有自己的专属技能，详情见「皮肤技能」页。</p>' },
 { id: 'skill', icon: '✨', title: '皮肤技能', content: '<h4>✨ 皮肤技能系统</h4><p>每个十二生肖皮肤都有自己<span class="hl2">独特的技能</span>，主动或被动。装备该皮肤后自动生效。</p><h4>🐭 鼠符咒 · 聚财（被动）</h4><div class="card"><div class="title">🐭 聚财</div><div class="desc">结算铜钱 <span class="hl3">+15%</span>。一局 300 分原本拿 30 铜钱，装备鼠皮肤后拿 34 铜钱。<br><span class="hl">双人 / 合作模式</span>：只要 P1 或 P2 任意一人装备鼠皮肤，本局铜钱就 +15%（不叠加）。</div></div><h4>🐮 牛符咒 · 铁壁（被动）</h4><div class="card"><div class="title">🐮 铁壁</div><div class="desc">撞到石头时<span class="hl2">不会死</span>，反而把石头撞碎继续前进。每局 <span class="hl3">3 次</span>。</div></div><h4>🐯 虎符咒 · 分身（主动）</h4><div class="card"><div class="title">🐯 分身</div><div class="desc">按 <kbd>E</kbd> 键（双人 P2 <kbd>P</kbd> 键，手机端点右下角技能按钮）生成一个<span class="hl3">幻影蛇</span>，持续 5 秒。幻影存在期间，野猫会<span class="hl2">优先追幻影</span>，忽略真身。每局 <span class="hl3">2 次</span>。</div></div><h4>🐰 兔符咒 · 疾风（被动）</h4><div class="card"><div class="title">🐰 疾风</div><div class="desc">初始速度 <span class="hl2">+10%</span>；加速药水 5 秒延长到 <span class="hl3">8 秒</span>；连击窗口额外 <span class="hl3">+0.5 秒</span>（6 秒 → 6.5 秒）。</div></div><h4>🐲 龙符咒 · 炎爆（主动）</h4><div class="card"><div class="title">🐲 炎爆</div><div class="desc">按 <kbd>E</kbd> 键向蛇头前方喷火 <span class="hl3">5 格</span>：<br>· 清除路径上的石头<br>· 击中野猫：猫停止 1 次移动<br>· 本局两次炎爆<span class="hl2">全部击中野猫</span> → 猫直接死亡 +100 分<br>每局 <span class="hl3">2 次</span>，冷却 <span class="hl3">5 秒</span>。</div></div><h4>🐍 蛇符咒 · 隐踪（主动）</h4><div class="card"><div class="title">🐍 隐踪</div><div class="desc">按 <kbd>E</kbd> 键进入 <span class="hl3">3 秒幽灵模式</span>。幽灵模式中：<br>· 穿过石头不死<br>· 穿过自己身体不死<br>· 穿过对方身体不死<br>· <span class="hl">不能穿过墙壁</span><br>每局 <span class="hl3">3 次</span>。</div></div><h4>🐴 马符咒 · 回春（被动）</h4><div class="card"><div class="title">🐴 回春</div><div class="desc">死亡后<span class="hl2">原地复活一次</span>，<span class="hl3">不扣分</span>，带 <span class="hl3">1.5 秒</span> 无敌虚化时间。每局限 1 次。与续命丹可叠加（续命丹优先消耗）。</div></div><h4>🐑 羊符咒 · 魂游（主动）</h4><div class="card"><div class="title">🐑 魂游</div><div class="desc">按 <kbd>E</kbd> 键：<br>· <span class="hl2">有猫时</span>：眩晕野猫，让猫停止之后 <span class="hl3">3 次移动</span><br>· <span class="hl2">无猫时</span>：自身无敌 <span class="hl3">3 秒</span><br>每局 <span class="hl3">3 次</span>。</div></div><h4>🔮 后续皮肤技能</h4><p>猴、鸡、狗、猪等其他生肖皮肤的技能会陆续上线。</p>' },
-{ id: 'title', icon: '🏅', title: '江湖称号', content: '<h4>🏅 江湖称号系统</h4><p>点击顶部 <span class="hl3">🏅 称号</span> 按钮，打开称号面板。称号根据你的生涯数据自动解锁，解锁后可以<span class="hl2">随意佩戴或取消</span>，佩戴中的称号会显示在<span class="hl">排行榜和结算界面</span>上。</p><h4>🎖️ 难度分级</h4><p>称号按难度分为 5 档，难度越高，称号特效越华丽：</p><div class="card"><div class="title">🥉 初出茅庐（青铜）</div><div class="desc">朴素灰字。例如：初入江湖、新手上路、小吃货、小蛇一条、初窥门径。</div></div><div class="card"><div class="title">🥈 小有名气（白银）</div><div class="desc">淡青发光。例如：铁头功（撞墙 100 次）、连击狂魔（单局 20 连）、小试牛刀（300 分）、大胃王（累计 500 食物）、老玩家（20 局）、稳如老狗（单局 180 秒）、双人首胜、同室操戈、合作首通、破图者。</div></div><div class="card"><div class="title">🥇 名震一方（黄金）</div><div class="desc">金色强光 + 微闪。例如：猫粮（被猫咬断 50 次）、猫见愁（围死猫 10 次）、一方高手（600 分）、连击之神（40 连）、百战老江湖（100 局）、富甲一方（累计 10000 分）、德比之王、双人封顶、双剑合璧、生死与共、五图通。</div></div><div class="card"><div class="title">💎 威震武林（钻石）</div><div class="desc">粉紫渐变 + 呼吸闪烁。例如：独孤求败（1000 分）、猫王克星（围死猫 50 次）、长寿仙（300 秒）、连击天尊（60 连）、完美配合（合作零阵亡）、同生共死（合作 50 次通关）、宿命对决（双人 50 胜）、种子猎手（单图 500 分）。</div></div><div class="card"><div class="title">👑 武林至尊（王者）</div><div class="desc">彩虹流动 + 光晕。例如：武林至尊（2000 分）、十二生肖之主（解锁全部皮肤）、圆满飞升（解锁全部成就）、图王（通关全部 10 张种子图）。</div></div><h4>🎮 如何佩戴</h4><p>在称号面板中，点击任意<span class="hl2">已解锁</span>的称号即可佩戴；再点一次可取消佩戴。佩戴状态会保存，刷新后仍然生效。</p><h4>🏆 排行榜展示</h4><p>种子局排行榜会在你的名字<span class="hl3">上方</span>显示当前佩戴的称号，称号徽章按难度显示不同特效。</p>' },
+{ id: 'title', icon: '🏅', title: '江湖称号', content: '<h4>🏅 江湖称号系统</h4><p>点击顶部 <span class="hl3">🏅 称号</span> 按钮，打开称号面板。称号根据你的生涯数据自动解锁，解锁后可以<span class="hl2">随意佩戴或取消</span>，佩戴中的称号会显示在<span class="hl">排行榜和结算界面</span>上。</p><h4>🎖️ 难度分级</h4><p>称号按难度分为 5 档，难度越高，称号特效越华丽：</p><div class="card"><div class="title">🥉 初出茅庐（青铜）</div><div class="desc">朴素灰字。例如：初入江湖、新手上路、小吃货、小蛇一条、初窥门径。</div></div><div class="card"><div class="title">🥈 小有名气（白银）</div><div class="desc">淡青发光。例如：铁头功（撞墙 100 次）、连击狂魔（单局 20 连）、小试牛刀（300 分）、大胃王（累计 500 食物）、老玩家（20 局）、稳如老狗（单局 180 秒）、双人首胜、同室操戈、合作首通、破图者。</div></div><div class="card"><div class="title">🥇 名震一方（黄金）</div><div class="desc">金色强光 + 微闪。例如：猫粮（被猫咬断 50 次）、猫见愁（围死猫 10 次）、一方高手（600 分）、连击之神（40 连）、百战老江湖（100 局）、富甲一方（累计 10000 分）、德比之王、双人封顶、双剑合璧、生死与共、五图通。</div></div><div class="card"><div class="title">💎 威震武林（钻石）</div><div class="desc">粉紫渐变 + 呼吸闪烁。例如：独孤求败（1000 分）、猫王克星（围死猫 50 次）、长寿仙（300 秒）、连击天尊（60 连）、完美配合（合作零阵亡）、同生共死（合作 50 次通关）、宿命对决（双人 50 胜）、种子猎手（单图 500 分）。</div></div><div class="card"><div class="title">👑 武林至尊（王者）</div><div class="desc">彩虹流动 + 光晕。例如：武林至尊（2000 分）、十二生肖之主（解锁全部皮肤）、圆满飞升（解锁全部成就）、图王（通关全部 10 张种子图）。</div></div><h4>🎮 如何佩戴</h4><p>在称号面板中，点击任意<span class="hl2">已解锁</span>的称号即可佩戴；再点一次可取消佩戴。佩戴状态会保存，刷新后仍然生效。</p><h4>🌟 客栈徽章与觉醒</h4><p>在「🏮 江湖客栈」里把某位生肖的好感度刷到 <span class="hl3">300</span>，即可获得他的<span class="hl2">客栈徽章</span>，同时解锁该生肖的<span class="hl2">皮肤觉醒</span>，技能获得强化。</p><h4>🏆 排行榜展示</h4><p>种子局排行榜会在你的名字<span class="hl3">上方</span>显示当前佩戴的称号，称号徽章按难度显示不同特效。</p>' },
+{ id: 'inn', icon: '🏮', title: '江湖客栈', content: '<h4>🏮 江湖客栈</h4><p>主界面<span class="hl3">右下角</span>有一扇木门，点击「走进客栈」，推门进入生肖们的客栈。</p><div class="card"><div class="title">🎯 好感度怎么涨</div><div class="desc">用某位生肖的皮肤<span class="hl2">玩一局单人</span>即涨好感度：基础 +10，单局吃 ≥20 个食物 +5，存活 ≥120 秒 +5，破纪录 +20。上限 <span class="hl3">300</span>。</div></div><div class="card"><div class="title">🎖️ 三档解锁</div><div class="desc"><span class="hl2">100</span> → 解锁方言台词（点木屋，头顶弹方言气泡）；<span class="hl2">200</span> → 解锁小故事；<span class="hl2">300</span> → 获得客栈徽章 + 皮肤觉醒。</div></div><div class="card"><div class="title">🌟 皮肤觉醒</div><div class="desc">好感度满 300 后，该生肖皮肤技能<span class="hl3">强化</span>：<br>· 🐭 鼠·聚财：铜钱加成 +15% → <span class="hl2">+30%</span><br>· 🐮 牛·铁壁：铁壁 3 次 → <span class="hl2">5 次</span>，撞碎石头额外 +5 分<br>· 🐯 虎·分身：幻影 5 秒 → <span class="hl2">8 秒</span>，幻影被猫击碎时给你 1.5 秒无敌</div></div><div class="card"><div class="title">💬 怎么和角色互动</div><div class="desc">· 点<span class="hl2">木屋或名字</span> → 头顶弹方言气泡（需好感度 ≥100）<br>· 点<span class="hl2">好感条</span> → 弹出详情窗，查看三档解锁进度与觉醒预览</div></div><div class="card"><div class="title">🎮 手机端彩蛋</div><div class="desc">在客栈页面连点老板娘 <span class="hl3">5 次</span>，所有生肖好感度直接拉满。</div></div>' },
 { id: 'stats', icon: '📊', title: '数据统计', content: '<h4>📊 数据统计面板</h4><p>点击顶部 <span class="hl3">📊 数据</span> 按钮，可以查看你所有的生涯数据。</p><div class="card"><div class="title">📊 生涯总览</div><div class="desc">总游玩局数、单人/双人/合作局数、累计游戏时长、累计吃食物数、累计总分。</div></div><div class="card"><div class="title">🏆 最高纪录</div><div class="desc">历史最高分、最长体长、最长生存时间、最高连击、单局最多吃食物数。</div></div><div class="card"><div class="title">💀 死因分布</div><div class="desc">撞墙、咬到自己、撞到对方、被猫抓住、被猫咬断、撞到石头的次数和占比。</div></div>' },
 { id: 'save', icon: '💾', title: '存档管理', content: '<h4>💾 存档管理</h4><p>点击顶部 <span class="hl3">⚙️ 设置</span> → 「💾 存档」，可以导出、导入、清空存档。</p><div class="card"><div class="title">📤 导出存档</div><div class="desc">把当前所有进度（成就、皮肤、称号、铜钱、背包、统计、迷宫进度、种子最高分、排行榜名字）导出为一段文本，复制保存好即可。</div></div><div class="card"><div class="title">📥 导入存档</div><div class="desc">把之前导出的存档文本粘贴到输入框，点击「确认导入」，进度就会恢复。换设备、换浏览器时特别有用。</div></div><div class="card"><div class="title">🗑️ 清空存档</div><div class="desc">一键清空所有进度，<span class="hl">不可恢复</span>。清空前建议先导出备份。</div></div><div class="card"><div class="title">🔍 存档诊断</div><div class="desc">存档面板底部会显示存储状态、存档体积、数据损坏情况。如果浏览器处于隐私模式，会提示「仅内存，刷新会丢」。</div></div>' },
 { id: 'settings', icon: '⚙️', title: '江湖设置', content: '<h4>⚙️ 江湖设置</h4><p>点击顶部 <span class="hl3">⚙️ 设置</span> 按钮，打开设置面板。</p><div class="card"><div class="title">🎮 游戏开关</div><div class="desc">🎵 背景音乐开关、🐱 猫鼠大战开关、🚧 障碍与传送门开关。</div></div><div class="card"><div class="title">📋 信息与存档</div><div class="desc">📊 数据（生涯统计）、📖 指南（你正在看的这个）、💾 存档（导出/导入/清空）。</div></div>' },
@@ -277,3 +284,79 @@ const TITLES = [
 // 称号存档键（与成就、最高分同风格）
 const TITLES_KEY = 'snakeTitlesV1';
 const EQUIPPED_TITLE_KEY = 'snakeEquippedTitleV1';
+// ===== 生肖客栈 =====
+const INN_AFFINITY_KEY = 'snakeInnAffinity';   // 存储：{ shu: 120, niu: 80, hu: 300 }
+const INN_MAX_AFFINITY = 300;                  // 好感度上限
+const INN_TIERS = [0, 100, 200, 300];          // 解锁节点：初识/熟络/知己/挚友
+
+const INN_CHARACTERS = {
+  shu: {
+    id: 'shu', skinId: 'shu', name: '鼠来宝', emoji: '🐭',
+    title: '客栈账房',
+    roomPos: { x: 22, y: 32 },   // 百分比坐标
+    personality: '机灵、精明、爱占小便宜但热心肠，算盘打得比谁都响。说话带上海腔，喜欢用"阿拉"自称，处处透着市井精明。',
+    dialect: '上海话',
+    dialectNote: '常用"阿拉"（我）、"侬"（你）、"伐"（吗）、"勿"（不）、"灵光"（聪明）、"惬意"（舒服）、"结棍"（厉害）。',
+    story: '鼠来宝本是江湖上跑单帮的小商贩，一算盘走天下。某年冬夜躲雨进了江湖客栈，被老板娘一碗热汤留住，从此成了客栈的账房先生。他算账从不差错，唯独算不清自己这些年在客栈里喝掉的汤钱。',
+        dialogs: [
+      '侬好呀，阿拉是鼠来宝，客栈账房。侬要点啥，阿拉给侬算算？',
+      '侬又来啦？阿拉今朝心情灵光，账都帮侬算好了。',
+      '侬晓得了伐，阿拉这半辈子最惬意的，就是在客栈帮侬记账。'
+    ],
+    // ★ 觉醒（好感度 300 得到徽章后触发，暂未实装，仅作设计记录）
+    awakening: {
+      name: '聚财·觉醒',
+      desc: '结算铜钱加成从 +20% 提升至 +30%。',
+      effect: { coinBonus: 0.30 }
+    }
+  },
+  niu: {
+    id: 'niu', skinId: 'niu', name: '牛气冲天', emoji: '🐮',
+    title: '客栈大厨',
+    roomPos: { x: 78, y: 32 },
+    personality: '憨厚、踏实、话不多但句句实在。说话带东北腔，喜欢用"俺"自称，一开口就是"那旮旯""整啥呢"，骨子里是个热心的大厨。',
+    dialect: '东北话',
+    dialectNote: '常用"俺"（我）、"那旮旯"（那地方）、"整"（做）、"得瑟"（显摆）、"咋整"（怎么办）、"老铁"（好朋友）。',
+    story: '牛气冲天原是长白山下的猎户，力气大得能扛一头牛。有一年江湖客栈走水，他冒火把老板娘背出来，从此留在客栈当了厨子。他的招牌菜是"牛气冲天锅"，据说吃一口能顶三天不饿。',
+    dialogs: [
+      '俺是牛气冲天，这旮旯的厨子。整点啥吃的？俺给你整俩硬菜。',
+      '老铁又来啦？俺给你留了那碗老汤，贼拉香。',
+      '俺这辈子就认两样：一是灶台，二是侬。侬来了俺就踏实。'
+    ],
+    // ★ 觉醒（好感度 300 得到徽章后触发，暂未实装，仅作设计记录）
+    awakening: {
+      name: '铁壁·觉醒',
+      desc: '撞碎石头的次数从每局 3 次提升至 5 次，且撞碎石头额外 +5 分。',
+      effect: { niuShieldLeft: 5, breakStoneBonus: 5 }
+    }
+  },
+  hu: {
+    id: 'hu', skinId: 'hu', name: '虎虎生威', emoji: '🐯',
+    title: '客栈护院',
+    roomPos: { x: 50, y: 84 },
+    personality: '勇猛、直爽、霸气外露，但有一颗护短的心。说话带川渝腔，喜欢用"老子""巴适""雄起"，一开口就是江湖气。',
+    dialect: '川渝话',
+    dialectNote: '常用"老子"（我）、"巴适"（舒服、好）、"雄起"（加油）、"瓜娃子"（傻小子）、"要得"（行）、"莫得"（没有）、"安逸"。',
+    story: '虎虎生威曾是山中之王，一次下山觅食被猎户所伤，是老板娘用草药救了他。伤好后他没回山，而是留在客栈当了护院。江湖上据说，只要虎爷在客栈门口一站，方圆十里无人敢惹事。',
+    dialogs: [
+      '要得！老子是虎虎生威，这客栈的护院。哪个瓜娃子敢闹事，老子收拾他。',
+      '兄弟又来咯？巴适得很！今天老子给你看个雄起的。',
+      '江湖那么大，老子只认一个地方——这客栈。你来了，老子就安逸。'
+    ],
+    // ★ 觉醒（好感度 300 得到徽章后触发，暂未实装，仅作设计记录）
+    awakening: {
+      name: '分身·觉醒',
+      desc: '幻影蛇存在时间从 5 秒延长至 8 秒，且幻影能替玩家挡一次猫的攻击。',
+      effect: { phantomDuration: 8000, phantomGuard: true }
+    }
+  }
+};
+
+// 好感度 → 等级（0=初识 1=熟络 2=知己 3=挚友）
+function getInnTier(affinity) {
+  if (affinity >= 300) return 3;
+  if (affinity >= 200) return 2;
+  if (affinity >= 100) return 1;
+  return 0;
+}
+const INN_TIER_NAMES = ['初识', '熟络', '知己', '挚友'];

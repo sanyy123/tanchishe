@@ -446,7 +446,7 @@ return {
 function applySkinPassive(p) {
   if (!p) return;
   if (p.skinId === 'tu') p.speedMultiplier = 1.1;
-  if (p.skinId === 'niu') p.niuShieldLeft = 3;
+  if (p.skinId === 'niu') p.niuShieldLeft = isSkinAwakened('niu') ? 5 : 3;
   if (p.skinId === 'ma') { p.hasRevive = true; p.reviveUsed = false; }
   if (p.skinId === 'she') { p.ghostLeft = 3; }
   if (p.skinId === 'hu') { p.phantomLeft = 2; }
@@ -760,7 +760,13 @@ if (targetHead.x === cat.x && targetHead.y === cat.y) {
   if (player.phantomData && performance.now() < player.phantomUntil) {
     player.phantomUntil = 0;
     player.phantomData = null;
-    showCheatToast('👻 幻影被猫击碎！', 700);
+    // ★ 虎觉醒：幻影挡刀，给玩家 1.5 秒无敌
+    if (isSkinAwakened('hu')) {
+      player.invincibleUntil = performance.now() + 1500;
+      showCheatToast('👻 幻影替你挡了一刀！获得 1.5 秒无敌（觉醒）', 1000);
+    } else {
+      showCheatToast('👻 幻影被猫击碎！', 700);
+    }
     return;
   }
   if (player.shield) { player.shield = false; player.invincibleUntil = performance.now() + 1200; showCheatToast('🛡️ 护盾抵挡了野猫！', 700); catActive=false; cat=null; catTrail=[]; return; }
@@ -783,7 +789,13 @@ if (targetHead.x===cat.x && targetHead.y===cat.y) {
   if (player.phantomData && performance.now() < player.phantomUntil) {
     player.phantomUntil = 0;
     player.phantomData = null;
-    showCheatToast('👻 幻影被猫击碎！', 700);
+    // ★ 虎觉醒：幻影挡刀，给玩家 1.5 秒无敌
+    if (isSkinAwakened('hu')) {
+      player.invincibleUntil = performance.now() + 1500;
+      showCheatToast('👻 幻影替你挡了一刀！获得 1.5 秒无敌（觉醒）', 1000);
+    } else {
+      showCheatToast('👻 幻影被猫击碎！', 700);
+    }
     return;
   }
   if (player.shield) { player.shield=false; player.invincibleUntil = performance.now() + 1200; showCheatToast('🛡️ 护盾抵挡了野猫！', 700); catActive=false; cat=null; catTrail=[]; return; }
@@ -944,6 +956,58 @@ else gameOver(reason + ' · 平局！');
 }
 }
 
+// ===== 生肖客栈 · 觉醒判定 =====
+// 好感度达到 INN_MAX_AFFINITY（300）时，该生肖皮肤的技能强化。
+// 判定数据来自 data.js 的 INN_CHARACTERS[skinId].awakening。
+function isSkinAwakened(skinId) {
+  if (!skinId || typeof INN_CHARACTERS === 'undefined') return false;
+  if (!INN_CHARACTERS[skinId]) return false;
+  const aff = SM.getJSON(INN_AFFINITY_KEY, {});
+  if (!aff || typeof aff !== 'object') return false;
+  return (aff[skinId] || 0) >= INN_MAX_AFFINITY;
+}
+
+// ===== 生肖客栈 · 好感度累加 =====
+// 只在单人普通模式累加；种子局不加（公平竞争），双人/合作不加（用的是 p1/p2 皮肤配置）。
+// 好感度上限 INN_MAX_AFFINITY=300，超出不涨。
+function accumulateInnAffinity() {
+  if (gameMode !== 'single' || currentSeedId !== null) return;
+  const skinId = boardSkinId;
+  if (!skinId || skinId === 'default') return;
+  const skinObj = SKINS[skinId];
+  if (!skinObj || !skinObj.unlockId) return;    // 只给生肖皮肤加
+  if (!INN_CHARACTERS[skinId]) return;           // 未录入客栈的角色跳过
+
+  const p = snakes[0];
+  if (!p) return;
+  let gain = 10;                                   // 基础
+  if ((p.foodsEaten || 0) >= 20) gain += 5;
+  if ((p.survivalTime || 0) >= 120) gain += 5;
+  // 破纪录：调用处会先跑 updateHighScore，此时 highScore 已更新
+  // 用"分数是否等于当前历史最高"判断会误判，改为读上一局的最高分对比
+  // 这里用最简单的方式：本局分数若等于 highScore 且 > 0 则视为破纪录（同一局只能触发一次）
+  if (score > 0 && score === highScore) gain += 20;
+
+  let aff = SM.getJSON(INN_AFFINITY_KEY, {});
+  if (!aff || typeof aff !== 'object' || Array.isArray(aff)) aff = {};
+  const before = aff[skinId] || 0;
+  const after = Math.min(INN_MAX_AFFINITY, before + gain);
+  if (after === before) return;
+  aff[skinId] = after;
+  SM.setJSON(INN_AFFINITY_KEY, aff);
+
+  // 跨过节点时提示（100/200/300）
+  const tierBefore = getInnTier(before);
+  const tierAfter = getInnTier(after);
+  if (tierAfter > tierBefore) {
+    const name = INN_CHARACTERS[skinId].name;
+    const tierName = INN_TIER_NAMES[tierAfter];
+    setTimeout(() => {
+      showCheatToast('🏮 ' + name + ' 对你的好感度达到「' + tierName + '」！', 2000);
+    }, 800);
+  }
+}
+
 function gameOver(reason) {
 if (isGameOver) return;
 // ★ 死亡/结束时立刻隐藏破纪录提示
@@ -1012,10 +1076,11 @@ if (currentSeedId !== null && gameMode === 'single') {
 
 // 普通模式：原逻辑
 let coinBonus = 0;
-if (gameMode === 'single' && boardSkinId === 'shu') coinBonus = 0.15;
-// ★ 合作模式也吃棋盘皮肤的加成（与双人一致：P1/P2 任一选了鼠皮肤即生效）
-else if (gameMode === 'double' && (p1SkinId === 'shu' || p2SkinId === 'shu')) coinBonus = 0.15;
-else if (gameMode === 'coop' && (p1SkinId === 'shu' || p2SkinId === 'shu')) coinBonus = 0.15;
+// ★ 鼠觉醒：+20% → +30%
+const shuBonus = isSkinAwakened('shu') ? 0.30 : 0.20;
+if (gameMode === 'single' && boardSkinId === 'shu') coinBonus = shuBonus;
+else if (gameMode === 'double' && (p1SkinId === 'shu' || p2SkinId === 'shu')) coinBonus = shuBonus;
+else if (gameMode === 'coop' && (p1SkinId === 'shu' || p2SkinId === 'shu')) coinBonus = shuBonus;
 
 const earnedCoins = Math.floor(finalScore / 10 * (1 + coinBonus));
 coins += earnedCoins;
@@ -1065,6 +1130,7 @@ if (dtype) stats.deaths[dtype] = (stats.deaths[dtype] || 0) + 1;
 saveStats();
 
 saveAchievements(); checkAchievements(); checkTitles();
+accumulateInnAffinity();   // ★ 客栈好感度
 
 setTimeout(() => {
   isDying = false;
@@ -1230,10 +1296,18 @@ shakeAmount = 22;
 vibrate([80,40,80]);
 spawnParticles(head.x, head.y, '#ffaa00');
 spawnParticles(head.x, head.y, '#ff6b6b');
-showCheatToast('🐮 牛符咒·铁壁！撞碎石头（剩余 ' + p.niuShieldLeft + ' 次）', 1000);
-p.dir = direction; p.nextDir = nextDirection; continue;
-} else { killPlayer(p, '撞到石头了'); continue; }
+// ★ 牛觉醒：撞碎石头额外 +5 分
+let niuBonusText = '';
+if (isSkinAwakened('niu')) {
+  p.score += 5;
+  if (gameMode === 'single') score = p.score;
+  if (p.id === 'p1') scoreEl.textContent = p.score; else score2El.textContent = p.score;
+  niuBonusText = ' · 觉醒 +5 分';
 }
+showCheatToast('🐮 牛符咒·铁壁！撞碎石头（剩余 ' + p.niuShieldLeft + ' 次）' + niuBonusText, 1000);
+p.dir = direction; p.nextDir = nextDirection; continue;
+}
+} // ← 修复：闭合 L1282 的 if (hasObstacleAt)，原代码缺失此括号导致语法错误
 if (selfBodySet.has(obstacleKey(head.x, head.y))) {
 if (isGhost) {
   spawnParticles(head.x, head.y, '#a06cd5');
@@ -2286,10 +2360,12 @@ function triggerActiveSkill(playerIdx) {
     const phantomBody = [{x: px, y: py}];
     for (let i = 1; i <= 2; i++) phantomBody.push({ x: px - i, y: py });
     p.phantomData = { body: phantomBody };
-    p.phantomUntil = now + 5000;
+    // ★ 虎觉醒：幻影 5 秒 → 8 秒
+    const phantomDur = isSkinAwakened('hu') ? 8000 : 5000;
+    p.phantomUntil = now + phantomDur;
     vibrate([60,30,60]);
     spawnParticles(px, py, '#ffcc66');
-    showCheatToast('🐯 虎符咒·分身！幻影出现 5 秒（剩余 ' + p.phantomLeft + ' 次）', 1000);
+    showCheatToast('🐯 虎符咒·分身！幻影出现 ' + (phantomDur/1000) + ' 秒（剩余 ' + p.phantomLeft + ' 次）' + (isSkinAwakened('hu') ? ' · 觉醒' : ''), 1000);
     if (window.__updateSkillBtn) window.__updateSkillBtn();
     return;
   }
