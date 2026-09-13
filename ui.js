@@ -52,8 +52,14 @@ const AI_SYSTEM_PROMPT = [
 '- 你爱叫他/她"宝宝"，语气亲切，但不会谄媚。',
 '- 你会用武侠梗，比如"内力深厚"、"走位如风"、"差点走火入魔"、"江湖上又要传开了"。',
 '',
+'【四种游戏模式 - 必须区分对待】',
+'1. 单人模式：玩家一个人闯江湖。点评他一个人的表现，可以夸走位、内力、胆识。',
+'2. 双人对战：P1 和 P2 互相竞争，先到 300 分或对方先死获胜。点评必须强调"两个人""对决""谁压过谁""分出高下"，用"德比""宿敌""死斗"这类词，不要说"配合"。',
+'3. 合作模式：P1/P2 是队友，共享 3 条命，一起闯江湖。点评必须强调"两个人""并肩""默契""共患难"，用"双剑合璧""同生共死"这类词，不要挑拨两人对立。',
+'4. 种子局挑战：固定随机序列的公平竞争地图，每张图有全球排行榜。点评要提"这张图""挑战""刷分""榜上"，可以调侃他"这张图又栽了几次"。',
+'',
 '【点评规则 - 必须严格遵守】',
-'1. 每次点评必须严格基于本次玩家数据（积分、体长、吃掉食物数），结合数据给出针对性的一句话。',
+'1. 每次点评必须严格基于本次玩家数据（积分、体长、吃掉食物数、游戏模式），结合数据给出针对性的一句话。',
 '2. 禁止使用之前用过的点评角度、句式或梗，每次都要换一个切入点。',
 '3. 每次点评的语气必须按照【本次语气要求】来，不能自己乱换。',
 '4. 如果系统提供了【最近几次评语】，必须避开那些表达方式，不许和它们相似。',
@@ -160,27 +166,80 @@ return list[Math.floor(Math.random() * list.length)];
 }
 
 function buildAIPrompt() {
-const p = (snakes && snakes[0]) || {};
-const s = p.score || 0;
-const l = (p.body && p.body.length) || 3;
-const f = p.foodsEaten || 0;
+  const tone = TONE_POOL[Math.floor(Math.random() * TONE_POOL.length)];
+  window.__currentTone = tone.id;
 
-const tone = TONE_POOL[Math.floor(Math.random() * TONE_POOL.length)];
-window.__currentTone = tone.id;
+  const isSeed   = (currentSeedId !== null && gameMode === 'single');
+  const isDouble = (gameMode === 'double');
+  const isCoop   = (gameMode === 'coop');
 
-let prompt = '';
-prompt += '【本次玩家数据】积分 ' + s + '，体长 ' + l + '，吃掉食物 ' + f + ' 个。\n';
-prompt += '【本次语气要求】以"' + tone.id + '"的语气点评：' + tone.desc + '\n';
+  let modeIntro = '';
+  let dataLine = '';
 
-if (recentComments.length > 0) {
-prompt += '【最近几次评语 - 必须避开，不许雷同】\n';
-recentComments.slice(-3).forEach((c, i) => { prompt += (i+1) + '. ' + c + '\n'; });
-prompt += '请用完全不同的角度、句式和梗，重新写一句评语。';
-} else {
-prompt += '请写一句评语。';
-}
+  if (isSeed) {
+    // ---- 种子局 ----
+    const seedLevel = SEED_LEVELS.find(s => s.id === currentSeedId);
+    const seedName  = seedLevel ? seedLevel.name : '未知图';
+    const seedEmoji = seedLevel ? seedLevel.emoji : '🌱';
+    const p = (snakes && snakes[0]) || {};
+    modeIntro = '【本次模式】种子局挑战。玩家在固定随机序列的地图「' + seedName + '」' + seedEmoji +
+                '上刷分，全球排行榜公平竞争。请点评这次挑战表现，可以提到这张地图、刷分、排行榜、公平竞争等关键词。\n';
+    dataLine = '【本次玩家数据】积分 ' + (p.score || 0) +
+               '，体长 ' + ((p.body && p.body.length) || 3) +
+               '，吃掉食物 ' + (p.foodsEaten || 0) + ' 个。\n';
+  } else if (isDouble) {
+    // ---- 双人对战 ----
+    const p1 = snakes[0] || {};
+    const p2 = snakes[1] || {};
+    const winner = (p1.score || 0) === (p2.score || 0) ? '平局' :
+                   ((p1.score || 0) > (p2.score || 0) ? 'P1 领先' : 'P2 领先');
+    modeIntro = '【本次模式】双人对战。P1 和 P2 互相竞争，先到 300 分或对方先死获胜。请点评这场对决，必须强调两人的对抗、胜负、谁压过谁。可以用"德比""宿敌""分出高下""死斗"这类词，绝对不要说"配合""默契"。\n';
+    dataLine = '【本次玩家数据】P1 积分 ' + (p1.score || 0) +
+               '，体长 ' + ((p1.body && p1.body.length) || 3) +
+               '，吃掉食物 ' + (p1.foodsEaten || 0) + ' 个；' +
+               'P2 积分 ' + (p2.score || 0) +
+               '，体长 ' + ((p2.body && p2.body.length) || 3) +
+               '，吃掉食物 ' + (p2.foodsEaten || 0) + ' 个。' +
+               '当前比分：' + winner + '。\n';
+  } else if (isCoop) {
+    // ---- 合作模式 ----
+    const p1 = snakes[0] || {};
+    const p2 = snakes[1] || {};
+    const total = (p1.score || 0) + (p2.score || 0);
+    const reasonText = (typeof overlayMsg !== 'undefined' && overlayMsg && overlayMsg.textContent) ? overlayMsg.textContent : '';
+    const isClear = reasonText.includes('合作达成');
+    modeIntro = '【本次模式】合作模式。P1/P2 是队友，共享 3 条命，一起闯江湖。请点评这次合作，必须强调两人的配合、默契、共患难。可以用"并肩""同生共死""双剑合璧""一条心"这类词，绝对不要挑拨两人对立。\n';
+    dataLine = '【本次玩家数据】P1 积分 ' + (p1.score || 0) +
+               '，体长 ' + ((p1.body && p1.body.length) || 3) +
+               '，吃掉食物 ' + (p1.foodsEaten || 0) + ' 个；' +
+               'P2 积分 ' + (p2.score || 0) +
+               '，体长 ' + ((p2.body && p2.body.length) || 3) +
+               '，吃掉食物 ' + (p2.foodsEaten || 0) + ' 个。' +
+               '双人合计积分 ' + total + '。' +
+               (isClear ? '本局合作达成！' : '本局未能通关。') + '\n';
+  } else {
+    // ---- 单人模式 ----
+    const p = (snakes && snakes[0]) || {};
+    modeIntro = '【本次模式】单人模式。玩家一个人闯江湖。\n';
+    dataLine = '【本次玩家数据】积分 ' + (p.score || 0) +
+               '，体长 ' + ((p.body && p.body.length) || 3) +
+               '，吃掉食物 ' + (p.foodsEaten || 0) + ' 个。\n';
+  }
 
-return prompt;
+  let prompt = '';
+  prompt += modeIntro;
+  prompt += dataLine;
+  prompt += '【本次语气要求】以"' + tone.id + '"的语气点评：' + tone.desc + '\n';
+
+  if (recentComments.length > 0) {
+    prompt += '【最近几次评语 - 必须避开，不许雷同】\n';
+    recentComments.slice(-3).forEach((c, i) => { prompt += (i+1) + '. ' + c + '\n'; });
+    prompt += '请用完全不同的角度、句式和梗，重新写一句评语。';
+  } else {
+    prompt += '请写一句评语。';
+  }
+
+  return prompt;
 }
 // ===== 皮肤解锁判断 =====
 function isSkinUnlocked(skin) { return !skin.unlockId || unlocked.includes(skin.unlockId) || cheatSkins.has(skin.unlockId); }
@@ -1187,9 +1246,19 @@ async function fetchLeaderboard(seedId) {
       data.leaderboard.forEach(item => {
         const medal = item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : '#' + item.rank;
         const isMe = item.playerName === myName ? ' is-me' : '';
+        // ★ 称号徽章：显示在名字上方
+        let titleHtml = '';
+        if (item.title) {
+          const t = TITLES.find(x => x.name === item.title);
+          const tierClass = t ? 'tier-' + t.tier : 'tier-bronze';
+          titleHtml = '<span class="lb-title title-badge ' + tierClass + '">' + escapeHtml(item.title) + '</span>';
+        }
         html += '<div class="leaderboard-row' + isMe + '">' +
           '<span class="lb-rank">' + medal + '</span>' +
-          '<span class="lb-name">' + escapeHtml(item.playerName) + '</span>' +
+          '<div class="lb-info">' +
+            titleHtml +
+            '<span class="lb-name">' + escapeHtml(item.playerName) + '</span>' +
+          '</div>' +
           '<span class="lb-score">' + escapeHtml(item.score) + '</span>' +
         '</div>';
       });
@@ -1243,5 +1312,108 @@ document.addEventListener('DOMContentLoaded', () => {
   // ④ ESC 关闭
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && lbModal.classList.contains('show')) lbModal.classList.remove('show');
+  });
+});
+// ==================== ★ 江湖称号面板 ★ ====================
+// 设计原则：按难度排序展示，已解锁的可以点击佩戴/取消，未解锁的显示进度条。
+// 佩戴状态直接写 localStorage，刷新后保留。
+
+const TITLE_TIER_ORDER = ['bronze', 'silver', 'gold', 'diamond', 'legend'];
+
+function renderTitles() {
+  const listEl = document.getElementById('titleList');
+  const countEl = document.getElementById('titleCount');
+  const currentEl = document.getElementById('titleCurrent');
+  if (!listEl) return;
+
+  if (countEl) countEl.textContent = unlockedTitles.length + '/' + TITLES.length;
+
+  // 当前佩戴
+  if (currentEl) {
+    const t = TITLES.find(x => x.id === equippedTitle);
+    if (t) {
+      currentEl.innerHTML = '<span class="title-badge tier-' + t.tier + '">🏅 ' + t.name + '</span>' +
+        '<span class="title-current-tip">佩戴中 · 点击下方卡片可更换或取消</span>';
+    } else {
+      currentEl.innerHTML = '<span class="title-current-tip">未佩戴称号 · 点击下方已解锁的称号即可佩戴</span>';
+    }
+  }
+
+  // 按难度排序
+  const sorted = [...TITLES].sort((a, b) =>
+    TITLE_TIER_ORDER.indexOf(a.tier) - TITLE_TIER_ORDER.indexOf(b.tier)
+  );
+
+  listEl.innerHTML = '';
+  let lastTier = '';
+  sorted.forEach(t => {
+    // 每个难度段加一个小标题
+    if (t.tier !== lastTier) {
+      lastTier = t.tier;
+      const sectionTitle = document.createElement('div');
+      sectionTitle.className = 'title-section-title tier-' + t.tier;
+      sectionTitle.textContent = TITLE_TIERS[t.tier].name;
+      listEl.appendChild(sectionTitle);
+    }
+
+    const isUnlocked = unlockedTitles.includes(t.id);
+    const isEquipped = equippedTitle === t.id;
+    const progress = t.progress ? Math.min(Math.max(t.progress(), 0), 1) : (isUnlocked ? 1 : 0);
+
+    const card = document.createElement('div');
+    card.className = 'title-card tier-' + t.tier +
+      (isUnlocked ? ' unlocked' : ' locked') +
+      (isEquipped ? ' equipped' : '');
+
+    let html = '<div class="title-card-top">' +
+      '<span class="title-badge tier-' + t.tier + '">' + t.name + '</span>' +
+      (isEquipped ? '<span class="title-equipped-tag">佩戴中</span>' : '') +
+      (isUnlocked ? '<span class="title-unlocked-tag">✅ 已解锁</span>' : '<span class="title-locked-tag">🔒 未解锁</span>') +
+    '</div>';
+    html += '<div class="title-card-desc">' + t.desc + '</div>';
+    if (!isUnlocked) {
+      html += '<div class="title-progress"><div class="title-progress-bar" style="width:' + (progress * 100).toFixed(0) + '%"></div></div>';
+      html += '<div class="title-progress-text">' + (progress * 100).toFixed(0) + '%</div>';
+    }
+    card.innerHTML = html;
+
+    if (isUnlocked) {
+      card.addEventListener('click', () => {
+        if (isEquipped) {
+          equippedTitle = '';
+          SM.safeRemove(EQUIPPED_TITLE_KEY);
+          showCheatToast('已取消佩戴称号', 900);
+        } else {
+          equippedTitle = t.id;
+          SM.safeSet(EQUIPPED_TITLE_KEY, equippedTitle);
+          showCheatToast('✨ 已佩戴「' + t.name + '」', 900);
+        }
+        renderTitles();
+      });
+    }
+
+    listEl.appendChild(card);
+  });
+}
+
+// 绑定称号按钮与弹窗关闭
+document.addEventListener('DOMContentLoaded', () => {
+  const titleBtn = document.getElementById('titleBtn');
+  const titleModal = document.getElementById('titleModal');
+  const closeTitle = document.getElementById('closeTitle');
+  if (!titleBtn || !titleModal) return;
+
+  titleBtn.addEventListener('click', () => {
+    renderTitles();
+    titleModal.classList.add('show');
+  });
+  if (closeTitle) closeTitle.addEventListener('click', () => titleModal.classList.remove('show'));
+  titleModal.addEventListener('click', (e) => {
+    if (e.target === titleModal) titleModal.classList.remove('show');
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && titleModal.classList.contains('show')) {
+      titleModal.classList.remove('show');
+    }
   });
 });

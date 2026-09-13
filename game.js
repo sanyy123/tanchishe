@@ -135,17 +135,30 @@ let stats = (() => {
     if (!Number.isFinite(x)) return d;
     return (min !== undefined && x < min) ? min : x;
   };
+  const arr = (v) => Array.isArray(v) ? v.filter(x => Number.isFinite(x)) : [];
   const sd = (src.deaths && typeof src.deaths === 'object' && !Array.isArray(src.deaths)) ? src.deaths : {};
   return {
     totalGames:      n(src.totalGames, 0, 0),
     singleGames:     n(src.singleGames, 0, 0),
     doubleGames:     n(src.doubleGames, 0, 0),
+    coopGames:       n(src.coopGames, 0, 0),
     totalPlayTime:   n(src.totalPlayTime, 0, 0),
     totalFoodsEaten: n(src.totalFoodsEaten, 0, 0),
     bestLength:      n(src.bestLength, 3, 3),
     bestCombo:       n(src.bestCombo, 0, 0),
     bestSurvivalTime:n(src.bestSurvivalTime, 0, 0),
     bestFoodsEaten:  n(src.bestFoodsEaten, 0, 0),
+    catBitesReceived:n(src.catBitesReceived, 0, 0),
+    catTrapped:      n(src.catTrapped, 0, 0),
+    // ★ 新增：双人 / 合作 / 种子局统计
+    doubleWins:      n(src.doubleWins, 0, 0),
+    doubleKills:     n(src.doubleKills, 0, 0),
+    coopWins:        n(src.coopWins, 0, 0),
+    coopPerfectWins: n(src.coopPerfectWins, 0, 0),
+    coopBestScore:   n(src.coopBestScore, 0, 0),
+    seedGames:       n(src.seedGames, 0, 0),
+    seedBestScore:   n(src.seedBestScore, 0, 0),
+    seedClears:      arr(src.seedClears),
     deaths: {
       wall:     n(sd.wall, 0, 0),
       self:     n(sd.self, 0, 0),
@@ -292,6 +305,43 @@ let unlocked = SM.getStringArray(ACHIEVE_KEY, VALID_ACHIEVE_IDS);
 highScore = SM.getInt(HIGH_KEY, 0, 0, 99999999);
 totalScoreAccum = SM.getInt(TOTAL_KEY, 0, 0, 999999999);
 highScoreEl.textContent = highScore;
+// ★ 称号解锁列表（只保留合法 id，防止脏数据）
+const VALID_TITLE_IDS = TITLES.map(t => t.id);
+let unlockedTitles = SM.getStringArray(TITLES_KEY, VALID_TITLE_IDS);
+// ★ 当前佩戴的称号：必须已解锁，否则视为未佩戴
+let equippedTitle = SM.getString(EQUIPPED_TITLE_KEY, '');
+if (!unlockedTitles.includes(equippedTitle)) equippedTitle = '';
+
+// ★ 称号解锁检查：与成就同节奏，在游戏结束时统一调用
+function checkTitles() {
+  let newly = [];
+  TITLES.forEach(t => {
+    if (unlockedTitles.includes(t.id)) return;
+    try {
+      if (t.check()) { unlockedTitles.push(t.id); newly.push(t); }
+    } catch (e) { console.warn('称号检查失败:', t.id, e); }
+  });
+  if (newly.length) {
+    SM.setJSON(TITLES_KEY, unlockedTitles);
+    newly.forEach((t, i) => setTimeout(() => showTitleToast(t), i * 1500));
+  }
+  return newly.length;
+}
+
+// ★ 称号解锁提示（独立于成就 toast，避免同屏重叠）
+function showTitleToast(title) {
+  const toast = document.createElement('div');
+  toast.className = 'title-toast tier-' + title.tier;
+  toast.innerHTML =
+    '<div class="tt-icon">🏅</div>' +
+    '<div class="tt-text"><h4>称号解锁</h4><p>' + title.name + '</p></div>';
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 500);
+  }, 2600);
+}
 function saveAchievements() {
   SM.setJSON(ACHIEVE_KEY, unlocked);
   SM.safeSet(TOTAL_KEY, String(totalScoreAccum));
@@ -746,6 +796,7 @@ const biteIndex = i;
 const removedCount = player.body.length - biteIndex;
 player.body = player.body.slice(0, biteIndex);
 catBiteLosses += removedCount;
+stats.catBitesReceived = (stats.catBitesReceived || 0) + 1;   // ★ 称号「猫粮」计数
 vibrate([120,60,120,60,120]); shakeAmount = 28;
 spawnParticles(cat.x, cat.y, '#ff4444'); spawnParticles(cat.x, cat.y, '#ffaa00');
 lengthEl.textContent = player.body.length;
@@ -913,6 +964,12 @@ if (currentSeedId !== null && gameMode === 'single') {
   const seedLevel = SEED_LEVELS.find(s => s.id === currentSeedId);
   const best = isNewRecord ? score : oldBest;
 
+  // ★ 更新种子局称号统计
+  stats.seedGames++;
+  if (!stats.seedClears.includes(currentSeedId)) stats.seedClears.push(currentSeedId);
+  stats.seedBestScore = Math.max(stats.seedBestScore, score);
+  saveStats();
+
   setTimeout(() => {
     isDying = false;
     stopLoop();
@@ -945,7 +1002,8 @@ if (currentSeedId !== null && gameMode === 'single') {
       const cleanName = (playerName || '').trim().slice(0, 15);
       if (cleanName) {
         SM.safeSet('snakePlayerName', cleanName);
-        submitLeaderboardScore(currentSeedId, cleanName, score, snakes[0] ? snakes[0].body.length : 3);
+        const titleName = equippedTitle ? (TITLES.find(t => t.id === equippedTitle) || {}).name || '' : '';
+        submitLeaderboardScore(currentSeedId, cleanName, score, snakes[0] ? snakes[0].body.length : 3, titleName);
       }
     }, 500);
   }, 1200);
@@ -965,8 +1023,20 @@ saveCoins();
 
 stats.totalGames++;
 if (gameMode === 'single') stats.singleGames++;
-else if (gameMode === 'coop') stats.coopGames = (stats.coopGames || 0) + 1;
+else if (gameMode === 'coop') stats.coopGames++;
 else stats.doubleGames++;
+
+// ★ 双人 / 合作模式的胜负统计
+if (gameMode === 'double') {
+  if ((reason || '').includes('获胜')) stats.doubleWins++;
+}
+if (gameMode === 'coop') {
+  if ((reason || '').includes('合作达成')) {
+    stats.coopWins++;
+    if (sharedLives === COOP_LIVES) stats.coopPerfectWins++;
+    stats.coopBestScore = Math.max(stats.coopBestScore, finalScore);
+  }
+}
 
 if (gameMode === 'single') {
   totalScoreAccum += score;
@@ -994,7 +1064,7 @@ const dtype = classifyDeathReason(reason);
 if (dtype) stats.deaths[dtype] = (stats.deaths[dtype] || 0) + 1;
 saveStats();
 
-saveAchievements(); checkAchievements();
+saveAchievements(); checkAchievements(); checkTitles();
 
 setTimeout(() => {
   isDying = false;
@@ -1002,6 +1072,14 @@ setTimeout(() => {
   overlayTitle.textContent = '修炼失败';
   overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && snakes[0] && snakes[0].body ? (' · 积分 '+score+' · 体长 '+snakes[0].body.length) : (gameMode === 'coop' ? (' · 双人合计积分 '+finalScore) : '')) + ' · 🪙 +' + earnedCoins;
   startBtn.textContent = '再次入世';
+  // ★ 结算界面显示佩戴中的称号
+  const titleBadgeEl = document.getElementById('resultTitleBadge');
+  if (titleBadgeEl) {
+    const t = TITLES.find(x => x.id === equippedTitle);
+    titleBadgeEl.innerHTML = t
+      ? '<span class="title-badge tier-' + t.tier + '">🏅 ' + t.name + '</span>'
+      : '';
+  }
   overlay.classList.remove('hidden');
   playBgm('menu');
   if (window.__updateSkillBtn) window.__updateSkillBtn();
@@ -1179,7 +1257,12 @@ if (isGhost) {
   spawnParticles(head.x, head.y, '#a06cd5');
 } else if (isInvincible) { p.dir = direction; p.nextDir = nextDirection; continue; }
 else if (p.shield) { p.shield = false; p.invincibleUntil = nowTs + 1200; showCheatToast('🛡️ 护盾抵挡了对方！', 700); p.dir = direction; p.nextDir = nextDirection; continue; }
-else { killPlayer(p, '撞到对方了'); continue; }
+    else {
+      // ★ 统计：对方被撞死，给存活方加一次 doubleKills（仅双人模式）
+      if (gameMode === 'double') stats.doubleKills++;
+      killPlayer(p, '撞到对方了');
+      continue;
+    }
 }
 snake.unshift(head);
 let ateSomething = false;
@@ -1285,13 +1368,14 @@ const cx = cat.x, cy = cat.y;
 catActive = false; cat = null; catTrail = []; catBiteLosses = 0;
 vibrate([200,100,200]); shakeAmount = 25;
 const p = snakes[0];
-if (p) {
-p.score += 50;
-if (gameMode === 'single') score = p.score;
-scoreEl.textContent = p.score;
-updateHighScore(p.score);
-}
-showCheatToast('🎉 你围死了野猫！奖励 50 分！');
+  if (p) {
+    p.score += 50;
+    if (gameMode === 'single') score = p.score;
+    scoreEl.textContent = p.score;
+    updateHighScore(p.score);
+  }
+  stats.catTrapped = (stats.catTrapped || 0) + 1;   // ★ 称号「猫见愁」计数
+  showCheatToast('🎉 你围死了野猫！奖励 50 分！');
 spawnParticles(cx, cy, '#ffaa00'); spawnParticles(cx, cy, '#ff4444');
 }
 const aliveNow = snakes.filter(p => p.alive);
@@ -2317,12 +2401,15 @@ window.__clearSeedMode = function() {
   gameRng = Math.random;
 };
 // ★ 提交排行榜成绩
-async function submitLeaderboardScore(seedId, playerName, score, length) {
+async function submitLeaderboardScore(seedId, playerName, score, length, titleName) {
   try {
     const res = await fetch('https://zhipu.wange5232.workers.dev/leaderboard/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ seedId, playerName, score, length })
+      body: JSON.stringify({
+        seedId, playerName, score, length,
+        title: titleName || ''   // ★ 称号名（不是 id），未佩戴时为空字符串
+      })
     });
     const data = await res.json();
     if (data.error) {
