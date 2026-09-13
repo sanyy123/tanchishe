@@ -11,6 +11,33 @@ const INVENTORY_P2_KEY = 'snakeInventoryP2V1';
 const EQUIPPED_P1_KEY = 'snakeEquippedP1V1';
 const EQUIPPED_P2_KEY = 'snakeEquippedP2V1';
 
+// ===== 美术调色板（全局统一）=====
+// 设计原则：深色基调 + 收敛的高饱和点缀。
+// 之前页面里同时出现青/紫/粉/黄/红五种高亮色互相抢眼，视觉上「吵」。
+// 现在把主色收敛为三个：青（primary）、紫（accent）、粉（danger/highlight），
+// 黄与红只作为「吃到/危险」的功能色出现，不再用于装饰。
+const PALETTE = {
+  // 底色三层，由深到浅，用于背景/面板/悬浮
+  bgDeep:    '#080b12',   // 页面最深底
+  bgBase:    '#0d1117',   // 棋盘底
+  bgPanel:   '#151b27',   // 卡片/面板
+  bgRaised:  '#1e2635',   // 悬浮卡片
+  // 主色
+  primary:   '#00f5d4',   // 青 —— 主行动色（P1、按钮、可交互）
+  accent:    '#9b5de5',   // 紫 —— 次要强调
+  highlight: '#f15bb5',   // 粉 —— 高亮/P2/危险提示
+  // 功能色（只在特定语义下使用）
+  gold:      '#ffcc00',   // 金 —— 分数/奖励
+  danger:    '#ff5757',   // 红 —— 危险/野猫
+  // 文本层级
+  textHi:    '#e8eef7',
+  textMid:   '#94a3b8',
+  textLo:    '#5b6b80',
+  // 描边
+  lineSoft:  'rgba(148,163,184,0.14)',
+  lineMid:   'rgba(148,163,184,0.26)'
+};
+
 // ===== 种子局 =====
 const SEED_HIGH_KEY_PREFIX = 'snakeSeedHigh_';
 const SEED_LEVELS = [
@@ -27,16 +54,22 @@ const SEED_LEVELS = [
 ];
 
 // ===== 皮肤 =====
+// ★ 棋盘风格：刻意保留「亮暗两派」，不强行统一（用户明确要求每套皮肤各有各的样子）
+//    亮派（暖）：鼠=米黄宣纸 / 虎=橙木 / 兔=樱粉 / 马=奶油
+//    亮派（冷）：牛=奶绿 / 龙=青瓷 / 蛇=薄荷 / 羊=藕荷
+//    暗派      ：经典青蛇=深夜霓虹
+//    boardBg / gridColor 给「非暖色皮肤」的兜底棋盘用；暖色皮肤的棋盘在 game.js
+//    的 drawWarmBoardDirect 里逐套绘制（含纹理与装饰）。
 const SKINS = {
-default: { id:'default', name:'经典青蛇', emoji:'🐍', unlockId:null, boardBg:'#0d1117', gridColor:'rgba(0,200,220,0.45)', headColors:['#5efce8','#00f5d4','#00bbf9'], bodyHue:{r:0,g:235,b:220}, foodColors:['#ff9a9a','#ff6b6b','#e03131'] },
-shu: { id:'shu', name:'鼠来宝', emoji:'🐭', unlockId:'skin_shu', skill:{ name:'鼠符咒 · 聚财', type:'passive', desc:'结算铜钱 +15%' } },
-niu: { id:'niu', name:'牛气冲天', emoji:'🐮', unlockId:'skin_niu', skill:{ name:'牛符咒 · 铁壁', type:'passive', desc:'每局 3 次撞碎石头不死' } },
-hu: { id:'hu', name:'虎虎生威', emoji:'🐯', unlockId:'skin_hu', skill:{ name:'虎符咒 · 分身', type:'active', desc:'按 E 生成幻影蛇 5 秒，猫优先追幻影，每局 2 次' } },
-tu: { id:'tu', name:'玉兔东升', emoji:'🐰', unlockId:'skin_tu', skill:{ name:'兔符咒 · 疾风', type:'passive', desc:'初始速度 +10%，加速药水 8 秒，连击窗口 +0.5 秒' } },
-long: { id:'long', name:'龙腾四海', emoji:'🐲', unlockId:'skin_long', skill:{ name:'龙符咒 · 炎爆', type:'active', desc:'按 E 喷火 5 格，清石头、击中猫停 1 次，两次全中猫死，每局 2 次（CD 5 秒）' } },
-she: { id:'she', name:'灵蛇出洞', emoji:'🐍', unlockId:'skin_she', skill:{ name:'蛇符咒 · 隐踪', type:'active', desc:'按 E 幽灵模式 3 秒，穿石头/自己/对方，每局 3 次' } },
-ma: { id:'ma', name:'一马当先', emoji:'🐴', unlockId:'skin_ma', skill:{ name:'马符咒 · 回春', type:'passive', desc:'死亡后原地复活一次，不扣分，带 1.5 秒无敌虚化' } },
-yang: { id:'yang', name:'三羊开泰', emoji:'🐑', unlockId:'skin_yang', skill:{ name:'羊符咒 · 魂游', type:'active', desc:'有猫时眩晕猫 3 次移动，无猫时自身无敌 3 秒，每局 3 次' } }
+default: { id:'default', name:'经典青蛇', emoji:'🐍', unlockId:null, boardBg:'#0d1117', gridColor:'rgba(0,200,220,0.45)', boardStyle:'暗派 · 深夜霓虹', headColors:['#5efce8','#00f5d4','#00bbf9'], bodyHue:{r:0,g:235,b:220}, foodColors:['#ff9a9a','#ff6b6b','#e03131'] },
+shu: { id:'shu', name:'鼠来宝', emoji:'🐭', unlockId:'skin_shu', boardBg:'#f7ecd8', gridColor:'rgba(168,124,72,0.30)', boardStyle:'暖派 · 米黄宣纸', skill:{ name:'鼠符咒 · 聚财', type:'passive', desc:'结算铜钱 +15%' } },
+niu: { id:'niu', name:'牛气冲天', emoji:'🐮', unlockId:'skin_niu', boardBg:'#f4f8ec', gridColor:'rgba(122,166,88,0.30)', boardStyle:'冷派 · 奶绿草原', skill:{ name:'牛符咒 · 铁壁', type:'passive', desc:'每局 3 次撞碎石头不死' } },
+hu: { id:'hu', name:'虎虎生威', emoji:'🐯', unlockId:'skin_hu', boardBg:'#fff1e0', gridColor:'rgba(214,138,74,0.32)', boardStyle:'暖派 · 橙木秋林', skill:{ name:'虎符咒 · 分身', type:'active', desc:'按 E 生成幻影蛇 5 秒，猫优先追幻影，每局 2 次' } },
+tu: { id:'tu', name:'玉兔东升', emoji:'🐰', unlockId:'skin_tu', boardBg:'#fff2f5', gridColor:'rgba(224,124,156,0.30)', boardStyle:'暖派 · 樱粉月夜', skill:{ name:'兔符咒 · 疾风', type:'passive', desc:'初始速度 +10%，加速药水 8 秒，连击窗口 +0.5 秒' } },
+long: { id:'long', name:'龙腾四海', emoji:'🐲', unlockId:'skin_long', boardBg:'#eef8f6', gridColor:'rgba(70,168,152,0.30)', boardStyle:'冷派 · 青瓷寒潭', skill:{ name:'龙符咒 · 炎爆', type:'active', desc:'按 E 喷火 5 格，清石头、击中猫停 1 次，两次全中猫死，每局 2 次（CD 5 秒）' } },
+she: { id:'she', name:'灵蛇出洞', emoji:'🐍', unlockId:'skin_she', boardBg:'#f1f8ea', gridColor:'rgba(118,166,80,0.30)', boardStyle:'冷派 · 薄荷幽谷', skill:{ name:'蛇符咒 · 隐踪', type:'active', desc:'按 E 幽灵模式 3 秒，穿石头/自己/对方，每局 3 次' } },
+ma: { id:'ma', name:'一马当先', emoji:'🐴', unlockId:'skin_ma', boardBg:'#fdf4e6', gridColor:'rgba(186,138,88,0.30)', boardStyle:'暖派 · 奶油原野', skill:{ name:'马符咒 · 回春', type:'passive', desc:'死亡后原地复活一次，不扣分，带 1.5 秒无敌虚化' } },
+yang: { id:'yang', name:'三羊开泰', emoji:'🐑', unlockId:'skin_yang', boardBg:'#f6f1fb', gridColor:'rgba(148,116,196,0.30)', boardStyle:'冷派 · 藕荷云海', skill:{ name:'羊符咒 · 魂游', type:'active', desc:'有猫时眩晕猫 3 次移动，无猫时自身无敌 3 秒，每局 3 次' } }
 };
 
 // ===== 双人模式 P2 的颜色 =====
@@ -53,37 +86,10 @@ const SHOP_ITEMS = [
   { id:'xuming',  name:'续命丹',  emoji:'💖', price:50, desc:'本局死亡时原地复活一次，保留一半分数' }
 ];
 
-// ===== 图片 URL =====
-const ASSET_KEYS = ['head','body','food','leaf','rab_head','rab_body','rab_food','rab_paw','dragon_head','dragon_decor','dragon_food','dragon_tail','snake_head','snake_tail','snake_food','snake_drop','snake_leaf','horse_head','horse_tail','horse_food','horse_decor','sheep_head','sheep_tail','sheep_food','sheep_decor','cat_head'];
+// ===== 素材 =====
+// 所有美术资源统一走本地图集：assets/atlas.png + assets/atlas.js
+// （原 image.arityflow.top 图床链接已移除，备份见 素材备份/原始图床链接.json）
 const ATLAS_IMAGE_URL = './assets/atlas.png';
-const ASSET_URLS = {
-head:'https://image.arityflow.top/uploads/2026/09/6aa356deba88b8.21233887_b9e60b5e.png',
-body:'https://image.arityflow.top/uploads/2026/09/6aa356deba26b9.46998108_9a8ed4b8.png',
-food:'https://image.arityflow.top/uploads/2026/09/6aa356debb5252.38936418_fffabaa3.png',
-leaf:'https://image.arityflow.top/uploads/2026/09/6aa356debc2132.60832467_95dd7a5b.png',
-rab_head:'https://image.arityflow.top/uploads/2026/09/6aa36a3bd1f804.90329529_c3d1e874.png',
-rab_body:'https://image.arityflow.top/uploads/2026/09/6aa36a3bd1d4c9.59552401_85683360.png',
-rab_food:'https://image.arityflow.top/uploads/2026/09/6aa36a3bd21114.87064191_fd857620.png',
-rab_paw:'https://image.arityflow.top/uploads/2026/09/6aa36a3bd19aa3.05231101_2d978cf0.png',
-dragon_head:'https://image.arityflow.top/uploads/2026/09/6aa36e868f2b03.99926099_86ae4a99.png',
-dragon_decor:'https://image.arityflow.top/uploads/2026/09/6aa36e868f5a99.30809262_383a272e.png',
-dragon_food:'https://image.arityflow.top/uploads/2026/09/6aa36e868f7368.71202277_ca1778a4.png',
-dragon_tail:'https://image.arityflow.top/uploads/2026/09/6aa3715b190fb8.56285996_d468575b.png',
-snake_head:'https://image.arityflow.top/uploads/2026/09/6aa38251c00717.62308042_a820e398.png',
-snake_tail:'https://image.arityflow.top/uploads/2026/09/6aa394d4d15705.11001502_ccf75684.png',
-snake_food:'https://image.arityflow.top/uploads/2026/09/6aa38251c06cb4.00963954_9f53019a.png',
-snake_drop:'https://image.arityflow.top/uploads/2026/09/6aa38251c07e54.72663869_80a125c7.png',
-snake_leaf:'https://image.arityflow.top/uploads/2026/09/6aa38251c08d46.88761122_ec110538.png',
-horse_head:'https://image.arityflow.top/uploads/2026/09/6aa387a99818a9.25005861_37dfc549.png',
-horse_tail:'https://image.arityflow.top/uploads/2026/09/6aa387a9986397.35619771_dbf38f2c.png',
-horse_food:'https://image.arityflow.top/uploads/2026/09/6aa394d4d17db0.72127420_62027464.png',
-horse_decor:'https://image.arityflow.top/uploads/2026/09/6aa387a9985341.74896386_f8ee9470.png',
-sheep_head:'https://image.arityflow.top/uploads/2026/09/6aa38bcd3f9b79.10883751_673cbd56.png',
-sheep_tail:'https://image.arityflow.top/uploads/2026/09/6aa38bcd3ff2f0.01251712_a76b01ff.png',
-sheep_food:'https://image.arityflow.top/uploads/2026/09/6aa38bcd3fc217.47547830_71182fd9.png',
-sheep_decor:'https://image.arityflow.top/uploads/2026/09/6aa38bcd3fdeb6.82296885_966ccafb.png',
-cat_head:'https://image.arityflow.top/uploads/2026/09/6aa3caa9164bd1.18514664_fd7e5de1.png'
-};
 
 // ===== BGM =====
 const BGM = { menu:'https://soundimage.org/wp-content/uploads/2020/10/Arcade-Quirkiness.mp3', stage0:'https://soundimage.org/wp-content/uploads/2017/07/Arcade-Puzzler.mp3', stage1:'https://soundimage.org/wp-content/uploads/2021/05/More-Coin-Op-Chaos.mp3', stage2:'https://soundimage.org/wp-content/uploads/2022/01/Technocade.mp3' };

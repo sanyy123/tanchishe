@@ -44,67 +44,90 @@ let isPaused = false;
 let mazeLoopActive = false;
 let countdownTimer = null;
 let shakeAmount = 0;
-let particles = [];
+// 粒子已改为对象池（见 particlePool / particleCount）
 let flashAlpha = 0;
+
+// ===== 存档 =====
+const SM = window.SaveManager;
+if (!SM) console.error('[存档] SaveManager 未加载，请检查 save.js 是否在 maze.js 之前引入');
+const MAX_LEVEL_ID = MAZE_LEVELS.length + 5;   // 关卡 id 合法范围上界
 
 // ===== 最高分存取 =====
 function getHighScore(levelId) {
-  const v = localStorage.getItem(MAZE_HIGHSCORE_PREFIX + levelId);
-  return v ? parseInt(v) : 0;
+  return SM.getInt(MAZE_HIGHSCORE_PREFIX + levelId, 0, 0, 99999999);
 }
 function setHighScore(levelId, score) {
   const old = getHighScore(levelId);
   if (score > old) {
-    localStorage.setItem(MAZE_HIGHSCORE_PREFIX + levelId, String(score));
+    SM.safeSet(MAZE_HIGHSCORE_PREFIX + levelId, String(score));
     return true;
   }
   return false;
 }
 function getClearedSet() {
-  try { return new Set(JSON.parse(localStorage.getItem(MAZE_CLEARED_KEY) || '[]')); }
-  catch (e) { return new Set(); }
+  // 只保留合法的关卡 id，防止脏数据让"已解锁关卡"错乱
+  return new Set(SM.getIntArray(MAZE_CLEARED_KEY, 1, MAX_LEVEL_ID));
 }
 function markCleared(levelId) {
   const s = getClearedSet();
   s.add(levelId);
-  localStorage.setItem(MAZE_CLEARED_KEY, JSON.stringify([...s]));
+  SM.setJSON(MAZE_CLEARED_KEY, [...s]);
 }
 
-// ===== 粒子系统 =====
+// ===== 粒子系统（对象池）=====
+// 与主游戏同样的问题：原来每颗粒子 new 对象、死亡时 splice，长时间玩会有 GC 尖刺。
+// 改为预分配池 + 原地压缩，粒子对象只创建一次，永不 new / splice。视觉公式完全不变。
+const MAZE_PARTICLE_MAX = 200;
+const particlePool = new Array(MAZE_PARTICLE_MAX);
+for (let i = 0; i < MAZE_PARTICLE_MAX; i++) {
+  particlePool[i] = { x: 0, y: 0, vx: 0, vy: 0, life: 0, decay: 0, size: 0, color: '#fff' };
+}
+let particleCount = 0;
+
 function spawnBurst(px, py, color, count) {
   for (let i = 0; i < count; i++) {
+    if (particleCount >= MAZE_PARTICLE_MAX) break;
+    const pt = particlePool[particleCount++];
     const angle = (Math.PI * 2 * i) / count + Math.random() * 0.5;
     const speed = 1.5 + Math.random() * 3.5;
-    particles.push({
-      x: px, y: py,
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      life: 1,
-      decay: 0.018 + Math.random() * 0.02,
-      size: 2 + Math.random() * 3.5,
-      color: color
-    });
+    pt.x = px; pt.y = py;
+    pt.vx = Math.cos(angle) * speed;
+    pt.vy = Math.sin(angle) * speed;
+    pt.life = 1;
+    pt.decay = 0.018 + Math.random() * 0.02;
+    pt.size = 2 + Math.random() * 3.5;
+    pt.color = color;
   }
 }
 function updateParticles() {
-  for (let i = particles.length - 1; i >= 0; i--) {
-    const p = particles[i];
+  let write = 0;
+  for (let read = 0; read < particleCount; read++) {
+    const p = particlePool[read];
     p.x += p.vx;
     p.y += p.vy;
     p.vx *= 0.94;
     p.vy *= 0.94;
     p.life -= p.decay;
-    if (p.life <= 0) particles.splice(i, 1);
+    if (p.life > 0) {
+      if (write !== read) {
+        const t = particlePool[write];
+        t.x = p.x; t.y = p.y; t.vx = p.vx; t.vy = p.vy;
+        t.life = p.life; t.decay = p.decay; t.size = p.size; t.color = p.color;
+      }
+      write++;
+    }
   }
+  particleCount = write;
 }
 function drawParticles() {
-  particles.forEach(p => {
+  for (let i = 0; i < particleCount; i++) {
+    const p = particlePool[i];
     mazeCtx.globalAlpha = p.life;
     mazeCtx.fillStyle = p.color;
     mazeCtx.beginPath();
     mazeCtx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
     mazeCtx.fill();
-  });
+  }
   mazeCtx.globalAlpha = 1;
 }
 
@@ -160,6 +183,7 @@ function loadLevel(levelIndex) {
     },
     invincibleUntil: 0,
     waitingDir: false,
+    waitingSince: 0,
     countdownActive: false,
     countdownValue: 3,
     startTime: 0,
@@ -176,7 +200,7 @@ function loadAndPrepareLevel(levelIndex) {
   mazeState = loadLevel(levelIndex);
   isPaused = false;
   shakeAmount = 0;
-  particles = [];
+  particleCount = 0;   // 清空粒子（池对象保留复用）
   flashAlpha = 0;
   levelValueEl.textContent = mazeState.level.id;
   mazeOverlay.classList.remove('hidden');
@@ -229,10 +253,11 @@ function startMaze() {
   mazeOverlay.classList.add('hidden');
   isPaused = false;
   mazeState.waitingDir = false;
+  mazeState.waitingSince = 0;
   mazeState.countdownActive = true;
   mazeState.countdownValue = 3;
   mazeState.elapsed = 0;
-  particles = [];
+  particleCount = 0;   // 清空粒子（池对象保留复用）
   shakeAmount = 0;
   flashAlpha = 0;
 
@@ -273,16 +298,40 @@ function mazeFrame(timestamp) {
 
   if (!isPaused && mazeState && !mazeState.finished && !mazeState.countdownActive) {
     mazeState.elapsed = (timestamp - mazeState.startTime) / 1000;
-    accumulator += delta;
-    const step = mazeState.level.speed;
-    let steps = 0;
-    while (accumulator >= step && steps < 5) {
-      mazeUpdate();
-      accumulator -= step;
-      steps++;
-      if (mazeState.finished || mazeState.waitingDir) break;
+
+    // ★ 撞墙后的等待转向期间：不要累积时间，否则解除等待的瞬间
+    //   会把积压的时间一次性补算，导致蛇连撞多次瞬间掉光血。
+    if (mazeState.waitingDir) {
+      accumulator = 0;
+      // 超时保护：玩家长时间不操作时，尝试自动找一个能走的方向脱离等待，
+      // 避免看起来像卡死。只有在真的存在可走方向时才自动移动，
+      // 否则保持等待（此时玩家按任意有效方向都能立刻脱困）。
+      if (mazeState.waitingSince && performance.now() - mazeState.waitingSince > 3000) {
+        const autoDir = findEscapeDir(mazeState);
+        if (autoDir) {
+          const s2 = mazeState.snake;
+          s2.nextDir = autoDir;
+          s2.dir = autoDir;
+          mazeState.invincibleUntil = 0;
+        }
+        mazeState.waitingDir = false;
+        mazeState.waitingSince = 0;
+        accumulator = 0;
+      }
+    } else {
+      accumulator += delta;
+      const step = mazeState.level.speed;
+      let steps = 0;
+      while (accumulator >= step && steps < 5) {
+        mazeUpdate();
+        accumulator -= step;
+        steps++;
+        if (mazeState.finished || mazeState.waitingDir) break;
+      }
+      if (steps >= 5) accumulator = 0;
+      // 进入等待状态后，把余量清掉，保证玩家换方向后能立刻起步
+      if (mazeState.waitingDir) accumulator = 0;
     }
-    if (steps >= 5) accumulator = 0;
   }
 
   updateParticles();
@@ -300,6 +349,7 @@ function mazeFrame(timestamp) {
 function mazeUpdate() {
   const s = mazeState;
   if (!s || s.finished || !s.snake.alive) return;
+  // 等待转向期间不推进（超时自动恢复的逻辑在 mazeFrame 里统一处理）
   if (s.waitingDir) return;
 
   const snake = s.snake;
@@ -330,6 +380,7 @@ function mazeUpdate() {
       return;
     }
     s.waitingDir = true;
+    s.waitingSince = performance.now();   // 用于超时自动恢复，避免永久卡住
     s.invincibleUntil = performance.now() + 2000;
     return;
   }
@@ -500,38 +551,80 @@ function buildWallCache(size) {
   const pad = 0.5;
   const bx = pad, by = pad, bs = size - pad * 2;
 
-  cx.fillStyle = 'rgba(0,0,0,0.35)';
-  cx.fillRect(bx + 2, by + bs - 2, bs, 2);
+  // ★ 美术重做：迷宫石墙从「纯色方块」升级为「有立体感的砖体」——
+  //    加圆角、加受光顶面、加深色砖缝、加右侧暗面，让它看起来是立体的障碍而不是色块。
+  //    这也是迷宫页唯一的大量重复元素，值得多花点笔画。
+  const r = Math.max(2, size * 0.14);
 
+  // 地面投影
+  cx.fillStyle = 'rgba(0,0,0,0.42)';
+  cx.beginPath();
+  cx.moveTo(bx + r + 1.5, by + bs - 2.5);
+  cx.lineTo(bx + bs - r + 1.5, by + bs - 2.5);
+  cx.quadraticCurveTo(bx + bs + 1.5, by + bs - 2.5, bx + bs + 1.5, by + bs - r - 2.5);
+  cx.lineTo(bx + r + 1.5, by + bs - 0.5);
+  cx.closePath();
+  cx.fill();
+
+  // 砖体主体：冷调蓝灰渐变，与主页面的石头同色系
   const grad = cx.createLinearGradient(bx, by, bx, by + bs);
-  grad.addColorStop(0, '#7a8494');
-  grad.addColorStop(0.35, '#525a68');
-  grad.addColorStop(0.75, '#383e4a');
-  grad.addColorStop(1, '#22262e');
+  grad.addColorStop(0, '#8b95a6');
+  grad.addColorStop(0.32, '#5c6576');
+  grad.addColorStop(0.72, '#3d4451');
+  grad.addColorStop(1, '#252a34');
+  const brickPath = () => {
+    cx.beginPath();
+    cx.moveTo(bx + r, by);
+    cx.lineTo(bx + bs - r, by);
+    cx.quadraticCurveTo(bx + bs, by, bx + bs, by + r);
+    cx.lineTo(bx + bs, by + bs - r);
+    cx.quadraticCurveTo(bx + bs, by + bs, bx + bs - r, by + bs);
+    cx.lineTo(bx + r, by + bs);
+    cx.quadraticCurveTo(bx, by + bs, bx, by + bs - r);
+    cx.lineTo(bx, by + r);
+    cx.quadraticCurveTo(bx, by, bx + r, by);
+    cx.closePath();
+  };
   cx.fillStyle = grad;
-  cx.fillRect(bx, by, bs, bs);
+  brickPath();
+  cx.fill();
 
-  const topGrad = cx.createLinearGradient(bx, by, bx, by + 4);
-  topGrad.addColorStop(0, 'rgba(255,255,255,0.32)');
+  cx.save();
+  brickPath();
+  cx.clip();
+  // 顶部受光面：上缘一条亮带
+  const topGrad = cx.createLinearGradient(bx, by, bx, by + bs * 0.38);
+  topGrad.addColorStop(0, 'rgba(255,255,255,0.40)');
   topGrad.addColorStop(1, 'rgba(255,255,255,0)');
   cx.fillStyle = topGrad;
-  cx.fillRect(bx, by, bs, 4);
+  cx.fillRect(bx, by, bs, bs * 0.38);
+  // 底部暗面
+  const botGrad = cx.createLinearGradient(bx, by + bs * 0.6, bx, by + bs);
+  botGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  botGrad.addColorStop(1, 'rgba(0,0,0,0.45)');
+  cx.fillStyle = botGrad;
+  cx.fillRect(bx, by + bs * 0.6, bs, bs * 0.4);
+  // 砖缝：两道横向细纹，暗示这是"砌起来的"
+  cx.strokeStyle = 'rgba(16,20,28,0.28)';
+  cx.lineWidth = Math.max(0.6, size * 0.02);
+  [0.42, 0.72].forEach(ry => {
+    cx.beginPath();
+    cx.moveTo(bx, by + bs * ry);
+    cx.lineTo(bx + bs, by + bs * ry);
+    cx.stroke();
+  });
+  // 左上高光点
+  cx.fillStyle = 'rgba(255,255,255,0.22)';
+  cx.beginPath();
+  cx.ellipse(bx + bs * 0.28, by + bs * 0.18, bs * 0.20, bs * 0.10, -0.5, 0, Math.PI * 2);
+  cx.fill();
+  cx.restore();
 
-  cx.fillStyle = 'rgba(255,255,255,0.15)';
-  cx.fillRect(bx, by, 2, bs);
-
-  cx.fillStyle = 'rgba(0,0,0,0.45)';
-  cx.fillRect(bx + bs - 2, by, 2, bs);
-
-  cx.fillStyle = 'rgba(0,0,0,0.55)';
-  cx.fillRect(bx, by + bs - 3, bs, 3);
-
-  cx.fillStyle = 'rgba(255,255,255,0.06)';
-  cx.fillRect(bx + bs * 0.2, by + bs * 0.3, bs * 0.5, 1.5);
-
-  cx.strokeStyle = 'rgba(0,0,0,0.25)';
-  cx.lineWidth = 1;
-  cx.strokeRect(bx + 0.5, by + 0.5, bs - 1, bs - 1);
+  // 外描边
+  cx.strokeStyle = 'rgba(10,14,22,0.62)';
+  cx.lineWidth = Math.max(0.8, size * 0.03);
+  brickPath();
+  cx.stroke();
 
   wallCacheCanvas = c;
   wallCacheCellSize = size;
@@ -600,14 +693,27 @@ function drawFood(x, y, size, type) {
   else if (type === 'diamond') { color = '#00e5ff'; glowColor = 'rgba(0,229,255,0.8)'; radius = size * 0.34; }
   else { color = '#ff6b6b'; glowColor = 'rgba(255,107,107,0.7)'; radius = size * 0.28; }
 
-  const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, size * 0.9);
+  const glow = ctx.createRadialGradient(cx, cy, 1, cx, cy, size * 0.92);
   glow.addColorStop(0, glowColor);
   glow.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = glow;
-  ctx.beginPath(); ctx.arc(cx, cy, size * 0.9, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, cy, size * 0.92, 0, Math.PI * 2); ctx.fill();
+
+  // ★ 美术重做：所有食物统一加「地面投影 + 深色描边 + 左上高光」，
+  //    让它们从深色棋盘上"浮起来"，而不是贴在上面的一块色
+  ctx.fillStyle = 'rgba(0,0,0,0.38)';
+  ctx.beginPath(); ctx.ellipse(cx, cy + radius * 1.35, radius * 0.85, radius * 0.30, 0, 0, Math.PI * 2); ctx.fill();
 
   if (type === 'diamond') {
-    // 钻石：菱形 + 顶部切面 + 内部高光
+    // 钻石：菱形 + 顶部切面 + 中心高光
+    ctx.fillStyle = '#0a86a0';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - radius * pulse);
+    ctx.lineTo(cx + radius * 0.7 * pulse, cy + radius * 0.10);
+    ctx.lineTo(cx, cy + radius * pulse);
+    ctx.lineTo(cx - radius * 0.7 * pulse, cy + radius * 0.10);
+    ctx.closePath();
+    ctx.fill();
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(cx, cy - radius * pulse);
@@ -616,7 +722,9 @@ function drawFood(x, y, size, type) {
     ctx.lineTo(cx - radius * 0.7 * pulse, cy);
     ctx.closePath();
     ctx.fill();
-    // 顶部切面
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.beginPath();
     ctx.moveTo(cx, cy - radius * pulse);
@@ -624,8 +732,7 @@ function drawFood(x, y, size, type) {
     ctx.lineTo(cx - radius * 0.35 * pulse, cy - radius * 0.4 * pulse);
     ctx.closePath();
     ctx.fill();
-    // 中心高光
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
     ctx.beginPath();
     ctx.moveTo(cx, cy - radius * 0.5 * pulse);
     ctx.lineTo(cx + radius * 0.25 * pulse, cy);
@@ -634,7 +741,7 @@ function drawFood(x, y, size, type) {
     ctx.closePath();
     ctx.fill();
   } else if (type === 'gem') {
-    ctx.fillStyle = color;
+    ctx.fillStyle = '#5a2d8f';
     ctx.beginPath();
     ctx.moveTo(cx, cy - radius * pulse);
     ctx.lineTo(cx + radius * pulse, cy);
@@ -642,7 +749,18 @@ function drawFood(x, y, size, type) {
     ctx.lineTo(cx - radius * pulse, cy);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - radius * pulse * 0.92);
+    ctx.lineTo(cx + radius * pulse * 0.92, cy);
+    ctx.lineTo(cx, cy + radius * pulse * 0.92);
+    ctx.lineTo(cx - radius * pulse * 0.92, cy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
     ctx.beginPath();
     ctx.moveTo(cx, cy - radius * pulse * 0.5);
     ctx.lineTo(cx + radius * pulse * 0.3, cy);
@@ -651,13 +769,29 @@ function drawFood(x, y, size, type) {
     ctx.closePath();
     ctx.fill();
   } else {
-    ctx.fillStyle = color;
+    // 普通 / 金食物：球体渐变，光源在左上
+    const sphere = ctx.createRadialGradient(
+      cx - radius * 0.36, cy - radius * 0.36, radius * 0.06,
+      cx, cy, radius * pulse
+    );
+    if (type === 'gold') {
+      sphere.addColorStop(0, '#fff3b0');
+      sphere.addColorStop(0.5, '#ffd700');
+      sphere.addColorStop(1, '#b8860b');
+    } else {
+      sphere.addColorStop(0, '#ffb3b3');
+      sphere.addColorStop(0.5, '#ff6b6b');
+      sphere.addColorStop(1, '#b02a2a');
+    }
+    ctx.fillStyle = sphere;
+    ctx.beginPath(); ctx.arc(cx, cy, radius * pulse, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(40,8,10,0.45)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, radius * pulse, 0, Math.PI * 2); ctx.stroke();
+    // 左上高光斑
+    ctx.fillStyle = 'rgba(255,255,255,0.78)';
     ctx.beginPath();
-    ctx.arc(cx, cy, radius * pulse, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.beginPath();
-    ctx.arc(cx - radius * 0.3, cy - radius * 0.3, radius * 0.3, 0, Math.PI * 2);
+    ctx.ellipse(cx - radius * 0.32, cy - radius * 0.36, radius * 0.28, radius * 0.20, -0.6, 0, Math.PI * 2);
     ctx.fill();
   }
 }
@@ -677,11 +811,11 @@ function drawMazeSnake(s) {
     const inset = isHead ? 2 : 4;
     if (isHead) {
       const cx = x + CELL / 2, cy = y + CELL / 2;
-      const glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, CELL);
-      glow.addColorStop(0, 'rgba(0,245,212,0.55)');
+      const glow = ctx.createRadialGradient(cx, cy, 2, cx, cy, CELL * 1.15);
+      glow.addColorStop(0, 'rgba(0,245,212,0.5)');
       glow.addColorStop(1, 'rgba(0,245,212,0)');
       ctx.fillStyle = glow;
-      ctx.fillRect(x - 8, y - 8, CELL + 16, CELL + 16);
+      ctx.fillRect(x - 9, y - 9, CELL + 18, CELL + 18);
 
       const grad = ctx.createLinearGradient(x, y, x + CELL, y + CELL);
       grad.addColorStop(0, '#5efce8');
@@ -691,20 +825,36 @@ function drawMazeSnake(s) {
       roundRectPath(ctx, x + inset, y + inset, CELL - inset * 2, CELL - inset * 2, 8);
       ctx.fill();
 
-      ctx.strokeStyle = 'rgba(255,255,255,0.4)';
-      ctx.lineWidth = 1;
-      roundRectPath(ctx, x + inset + 1, y + inset + 1, CELL - inset * 2 - 2, CELL - inset * 2 - 2, 7);
+      // ★ 美术重做：蛇头加「深色描边 + 顶部高光弧」，在深色迷宫里轮廓更清楚
+      ctx.save();
+      roundRectPath(ctx, x + inset, y + inset, CELL - inset * 2, CELL - inset * 2, 8);
+      ctx.clip();
+      const hhGrad = ctx.createLinearGradient(0, y + inset, 0, y + CELL * 0.6);
+      hhGrad.addColorStop(0, 'rgba(255,255,255,0.42)');
+      hhGrad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = hhGrad;
+      ctx.fillRect(x + inset, y + inset, CELL - inset * 2, CELL * 0.55);
+      ctx.restore();
+
+      ctx.strokeStyle = 'rgba(4,32,34,0.55)';
+      ctx.lineWidth = 1.1;
+      roundRectPath(ctx, x + inset + 0.5, y + inset + 0.5, CELL - inset * 2 - 1, CELL - inset * 2 - 1, 7.5);
       ctx.stroke();
 
-      const eyeOff = CELL * 0.18;
+      // 眼睛：白眼球 + 深色瞳，朝向随移动方向
+      const eyeOff = CELL * 0.17;
       const dir = snake.dir;
-      const ex1 = cx + (dir.x !== 0 ? dir.x * eyeOff : -eyeOff * 0.6);
-      const ey1 = cy + (dir.y !== 0 ? dir.y * eyeOff : -eyeOff * 0.6);
-      const ex2 = cx + (dir.x !== 0 ? dir.x * eyeOff : eyeOff * 0.6);
-      const ey2 = cy + (dir.y !== 0 ? dir.y * eyeOff : eyeOff * 0.6);
-      ctx.fillStyle = '#0a0e17';
-      ctx.beginPath(); ctx.arc(ex1, ey1, 2.5, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(ex2, ey2, 2.5, 0, Math.PI * 2); ctx.fill();
+      const perpX = dir.y !== 0 ? 1 : 0;
+      const perpY = dir.x !== 0 ? 1 : 0;
+      const lookX = dir.x * CELL * 0.07, lookY = dir.y * CELL * 0.07;
+      const e1x = cx + perpX * eyeOff + lookX, e1y = cy + perpY * eyeOff + lookY;
+      const e2x = cx - perpX * eyeOff + lookX, e2y = cy - perpY * eyeOff + lookY;
+      ctx.fillStyle = 'rgba(255,255,255,0.95)';
+      ctx.beginPath(); ctx.arc(e1x, e1y, CELL * 0.13, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e2x, e2y, CELL * 0.13, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#0a1018';
+      ctx.beginPath(); ctx.arc(e1x + lookX * 0.5, e1y + lookY * 0.5, CELL * 0.07, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(e2x + lookX * 0.5, e2y + lookY * 0.5, CELL * 0.07, 0, Math.PI * 2); ctx.fill();
     } else {
       const grad = ctx.createLinearGradient(x, y, x + CELL, y + CELL);
       grad.addColorStop(0, '#00f5d4');
@@ -712,9 +862,19 @@ function drawMazeSnake(s) {
       ctx.fillStyle = grad;
       roundRectPath(ctx, x + inset, y + inset, CELL - inset * 2, CELL - inset * 2, 6);
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      // 每节都加一层上缘高光，蛇身连起来看就是一条有体积的链
+      ctx.save();
+      roundRectPath(ctx, x + inset, y + inset, CELL - inset * 2, CELL - inset * 2, 6);
+      ctx.clip();
+      const segHi = ctx.createLinearGradient(0, y + inset, 0, y + inset + (CELL - inset * 2) * 0.6);
+      segHi.addColorStop(0, 'rgba(255,255,255,0.30)');
+      segHi.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = segHi;
+      ctx.fillRect(x + inset, y + inset, CELL - inset * 2, (CELL - inset * 2) * 0.6);
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(0,60,72,0.42)';
       ctx.lineWidth = 1;
-      roundRectPath(ctx, x + inset + 1, y + inset + 1, CELL - inset * 2 - 2, CELL - inset * 2 - 2, 5);
+      roundRectPath(ctx, x + inset + 0.5, y + inset + 0.5, CELL - inset * 2 - 1, CELL - inset * 2 - 1, 5.5);
       ctx.stroke();
     }
   });
@@ -732,6 +892,34 @@ function roundRectPath(ctx, x, y, w, h, r) {
 }
 
 // ===== 输入 =====
+// 撞墙后的"等待转向"状态。这里有两个必须同时满足的约束，缺一个手感就崩：
+//   ① 不能卡死：原实现只接受"按下去不会被墙挡住"的方向，而第 1 关起点上方/左方
+//      都是墙，按「上」或「左」直接永久锁死，游戏无法继续。
+//   ② 不能白扣血：如果无脑接受任何方向，玩家在贴墙时按"还是那面墙"的方向，
+//      蛇会在原地反复撞墙，按一次掉一滴血，血的体验会非常糟糕。
+//   解决方式：等待期间只接受"下一步真的能走"的方向（含 180° 掉头，此时蛇尚未
+//   前进，不存在反向自杀问题）；按到仍然被墙挡住的方向则静默忽略、留在等待态。
+//   这样既永远能脱困，又不会因为误触方向键白掉血。
+function isMazeCellBlocked(x, y) {
+  if (!mazeState) return true;
+  if (x < 0 || y < 0 || x >= mazeState.level.cols || y >= mazeState.level.rows) return true;
+  return mazeState.wallsSet.has(x + ',' + y);
+}
+
+// 超时自动脱困用：优先掉头（一般最安全），其次任一可走方向；都没有则返回 null
+function findEscapeDir(state) {
+  if (!state || !state.snake) return null;
+  const head = state.snake.body[0];
+  const cur = state.snake.dir;
+  const back = { x: -cur.x, y: -cur.y };
+  const candidates = [back, { x: 0, y: -1 }, { x: 0, y: 1 }, { x: -1, y: 0 }, { x: 1, y: 0 }];
+  for (const d of candidates) {
+    if (d.x === 0 && d.y === 0) continue;
+    if (!isMazeCellBlocked(head.x + d.x, head.y + d.y)) return d;
+  }
+  return null;
+}
+
 function setMazeDir(dir) {
   if (!mazeState || mazeState.finished || mazeState.countdownActive) return;
   const s = mazeState.snake;
@@ -742,20 +930,21 @@ function setMazeDir(dir) {
     { x: 1, y: 0 };
 
   if (mazeState.waitingDir) {
+    const head = s.body[0];
+    // 只有目标格确实可走才脱离等待（允许掉头）；否则忽略这次按键，避免原地连撞扣血
+    if (isMazeCellBlocked(head.x + newDir.x, head.y + newDir.y)) return;
     s.nextDir = newDir;
-    const testHead = { x: s.body[0].x + newDir.x, y: s.body[0].y + newDir.y };
-    const blocked = mazeState.wallsSet.has(testHead.x + ',' + testHead.y) ||
-                    testHead.x < 0 || testHead.x >= mazeState.level.cols ||
-                    testHead.y < 0 || testHead.y >= mazeState.level.rows;
-    if (!blocked) {
-      s.dir = newDir;
-      mazeState.waitingDir = false;
-      mazeState.invincibleUntil = 0;
-    }
-  } else {
-    if (newDir.x === -s.dir.x && newDir.y === -s.dir.y) return;
-    s.nextDir = newDir;
+    s.dir = newDir;
+    mazeState.waitingDir = false;
+    mazeState.waitingSince = 0;
+    mazeState.invincibleUntil = 0;
+    accumulator = 0;      // 清掉积压，保证换向瞬间是"一步一步"走，而不是连冲几格
+    return;
   }
+
+  // 正常行驶中：不允许 180 度掉头
+  if (newDir.x === -s.dir.x && newDir.y === -s.dir.y) return;
+  s.nextDir = newDir;
 }
 
 document.addEventListener('keydown', (e) => {
@@ -885,6 +1074,12 @@ resultNextBtn.addEventListener('click', () => {
 
 // ===== 启动 =====
 renderLevelList();
+
+// ★ 首次进入必须初始化第 1 关，否则 mazeState 为 null，点「开始」不会有任何反应。
+// （原来漏了这一步：加载屏关掉了，但关卡从未加载）
+loadAndPrepareLevel(currentLevelIndex);
+
+// 首次进入默认弹出选关面板，方便玩家挑关卡
 levelSelectModal.classList.add('show');
 
 const mazeLoadingEl = document.getElementById('mazeLoading');

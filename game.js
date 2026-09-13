@@ -1,6 +1,8 @@
 // ===== DOM 引用 =====
 const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+// 用 let 而非 const：棋盘缓存构建时需要临时把绘制目标切到离屏画布，
+// 构建完会在 finally 里切回主画布。除此之外 ctx 始终指向主画布 2D 上下文。
+let ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 const score2El = document.getElementById('score2');
 const score2Stat = document.getElementById('score2Stat');
@@ -44,7 +46,16 @@ canvas.height = LOGICAL_SIZE * dpr;
 ctx.scale(dpr, dpr);
 
 // ===== 全局状态 =====
+// gameMode 取值：'single' 单人 | 'double' 双人对战 | 'coop' 合作模式（双人共享生命）
 let gameMode = 'single';
+// ★ 合作模式：两人共用的剩余生命数。任意一条蛇死亡扣 1，扣到 0 才真正结束
+let sharedLives = 0;
+const COOP_LIVES = 3;
+// ★ 合作模式复活塞：记录每条蛇的出生点与初始朝向，死亡后按原样重置
+const COOP_SPAWN = {
+  p1: { x: 5,  y: 5,  dir: { x: 1,  y: 0 } },
+  p2: { x: 24, y: 24, dir: { x: -1, y: 0 } }
+};
 let snakes = [];
 let food = { x: 0, y: 0 };
 let score = 0, highScore = 0;
@@ -70,52 +81,82 @@ function mulberry32(seed) {
 }
 
 // ===== 商城 / 铜钱 / 道具 =====
-let coins = parseInt(localStorage.getItem(COINS_KEY) || '0');
+// 统一走 SaveManager 读取，读取失败/数据损坏时自动回退默认值，不会把 NaN 带进游戏
+const SM = window.SaveManager;
+if (!SM) console.error('[存档] SaveManager 未加载，请检查 save.js 是否在 game.js 之前引入');
+const COIN_MAX = 99999999;   // 铜钱上限，防止脏数据导致显示溢出
 
-let inventory = (() => { try { return JSON.parse(localStorage.getItem(INVENTORY_KEY) || '{}'); } catch(e) { return {}; } })();
-let equippedItem = localStorage.getItem(EQUIPPED_KEY) || '';
+let coins = SM.getInt(COINS_KEY, 0, 0, COIN_MAX);
 
-let inventoryP1 = (() => { try { return JSON.parse(localStorage.getItem(INVENTORY_P1_KEY) || '{}'); } catch(e) { return {}; } })();
-let inventoryP2 = (() => { try { return JSON.parse(localStorage.getItem(INVENTORY_P2_KEY) || '{}'); } catch(e) { return {}; } })();
-let equippedItemP1 = localStorage.getItem(EQUIPPED_P1_KEY) || '';
-let equippedItemP2 = localStorage.getItem(EQUIPPED_P2_KEY) || '';
+// 背包校验：必须是对象，且每个道具数量都得是合法的非负整数
+function readInventory(key) {
+  const raw = SM.getJSON(key, {});
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const validIds = SHOP_ITEMS.map(i => i.id);
+  const clean = {};
+  Object.keys(raw).forEach(id => {
+    if (!validIds.includes(id)) return;                 // 丢掉不认识的道具
+    const n = parseInt(raw[id], 10);
+    if (Number.isFinite(n) && n > 0) clean[id] = Math.min(n, 999); // 数量钳制
+  });
+  return clean;
+}
+
+let inventory = readInventory(INVENTORY_KEY);
+// 装备项必须是合法道具 id，否则视为未装备
+function readEquipped(key) {
+  const id = SM.getString(key, '');
+  return SHOP_ITEMS.some(i => i.id === id) ? id : '';
+}
+let equippedItem = readEquipped(EQUIPPED_KEY);
+
+let inventoryP1 = readInventory(INVENTORY_P1_KEY);
+let inventoryP2 = readInventory(INVENTORY_P2_KEY);
+let equippedItemP1 = readEquipped(EQUIPPED_P1_KEY);
+let equippedItemP2 = readEquipped(EQUIPPED_P2_KEY);
 
 let thisRunHasLuopan = false;
 let thisRunHasLuopanP1 = false;
 let thisRunHasLuopanP2 = false;
 // ★ 已移除 thisRunRecordHintShown，改用实时判断
 
-function saveCoins() { try { localStorage.setItem(COINS_KEY, String(coins)); } catch(e) {} }
-function saveInventory() { try { localStorage.setItem(INVENTORY_KEY, JSON.stringify(inventory)); } catch(e) {} }
-function saveInventoryP1() { try { localStorage.setItem(INVENTORY_P1_KEY, JSON.stringify(inventoryP1)); } catch(e) {} }
-function saveInventoryP2() { try { localStorage.setItem(INVENTORY_P2_KEY, JSON.stringify(inventoryP2)); } catch(e) {} }
+function saveCoins() { SM.safeSet(COINS_KEY, String(coins)); }
+function saveInventory() { SM.setJSON(INVENTORY_KEY, inventory); }
+function saveInventoryP1() { SM.setJSON(INVENTORY_P1_KEY, inventoryP1); }
+function saveInventoryP2() { SM.setJSON(INVENTORY_P2_KEY, inventoryP2); }
 
 // ===== 数据统计 =====
+// 逐字段校验：任何一项损坏都只重置那一项，不会整份统计归零
 let stats = (() => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STATS_KEY) || '{}');
-    return {
-      totalGames: saved.totalGames || 0,
-      singleGames: saved.singleGames || 0,
-      doubleGames: saved.doubleGames || 0,
-      totalPlayTime: saved.totalPlayTime || 0,
-      totalFoodsEaten: saved.totalFoodsEaten || 0,
-      bestLength: saved.bestLength || 3,
-      bestCombo: saved.bestCombo || 0,
-      bestSurvivalTime: saved.bestSurvivalTime || 0,
-      bestFoodsEaten: saved.bestFoodsEaten || 0,
-      deaths: saved.deaths || { wall:0, self:0, other:0, cat:0, catBite:0, obstacle:0 }
-    };
-  } catch (e) {
-    return {
-      totalGames: 0, singleGames: 0, doubleGames: 0,
-      totalPlayTime: 0, totalFoodsEaten: 0,
-      bestLength: 3, bestCombo: 0, bestSurvivalTime: 0, bestFoodsEaten: 0,
-      deaths: { wall:0, self:0, other:0, cat:0, catBite:0, obstacle:0 }
-    };
-  }
+  const saved = SM.getJSON(STATS_KEY, {});
+  const src = (saved && typeof saved === 'object' && !Array.isArray(saved)) ? saved : {};
+  const n = (v, d, min) => {
+    const x = parseInt(v, 10);
+    if (!Number.isFinite(x)) return d;
+    return (min !== undefined && x < min) ? min : x;
+  };
+  const sd = (src.deaths && typeof src.deaths === 'object' && !Array.isArray(src.deaths)) ? src.deaths : {};
+  return {
+    totalGames:      n(src.totalGames, 0, 0),
+    singleGames:     n(src.singleGames, 0, 0),
+    doubleGames:     n(src.doubleGames, 0, 0),
+    totalPlayTime:   n(src.totalPlayTime, 0, 0),
+    totalFoodsEaten: n(src.totalFoodsEaten, 0, 0),
+    bestLength:      n(src.bestLength, 3, 3),
+    bestCombo:       n(src.bestCombo, 0, 0),
+    bestSurvivalTime:n(src.bestSurvivalTime, 0, 0),
+    bestFoodsEaten:  n(src.bestFoodsEaten, 0, 0),
+    deaths: {
+      wall:     n(sd.wall, 0, 0),
+      self:     n(sd.self, 0, 0),
+      other:    n(sd.other, 0, 0),
+      cat:      n(sd.cat, 0, 0),
+      catBite:  n(sd.catBite, 0, 0),
+      obstacle: n(sd.obstacle, 0, 0)
+    }
+  };
 })();
-function saveStats() { try { localStorage.setItem(STATS_KEY, JSON.stringify(stats)); } catch (e) {} }
+function saveStats() { SM.setJSON(STATS_KEY, stats); }
 function classifyDeathReason(reason) {
   if (!reason) return null;
   if (reason.includes('咬断')) return 'catBite';
@@ -129,10 +170,12 @@ function classifyDeathReason(reason) {
 
 let rafId = null, loopActive = false, lastFrameTs = 0, accumulator = 0;
 let isPaused = false, isGameOver = false, isDying = false, speed = 160;
-let particles = [], foodPulse = 0;
+let foodPulse = 0;   // 粒子已改为对象池（见 particlePool / particleCount）
 let shakeAmount = 0;
 let musicEnabled = true, currentBgmKey = '', bgmRetryTimer = null;
-let cheatSkins = new Set(JSON.parse(localStorage.getItem('snakeCheatSkins') || '[]'));
+// 作弊解锁的皮肤：只接受合法成就 id，过滤脏数据
+const VALID_SKIN_IDS = ACHIEVEMENTS.filter(a => a.id.startsWith('skin_')).map(a => a.id);
+let cheatSkins = new Set(SM.getStringArray('snakeCheatSkins', VALID_SKIN_IDS));
 let specialFood = null, specialFoodTimer = 0;
 const SPECIAL_FOOD_DURATION = 8000;
 let specialFoodCooldown = 0;
@@ -140,11 +183,11 @@ let cat = null, catActive = false;
 const CAT_ACTIVATE_SCORE = 250;
 let catTrail = [], catBiteLosses = 0;
 const CAT_BITE_LOSS_LIMIT = 20;
-let catModeEnabled = localStorage.getItem('snakeCatMode') !== '0';
+let catModeEnabled = SM.getBool('snakeCatMode', true);
 let obstacles = [];
 let portals = [];
 let portalPairCounter = 0;
-let obstacleModeEnabled = localStorage.getItem('snakeObstacleMode') !== '0';
+let obstacleModeEnabled = SM.getBool('snakeObstacleMode', true);
 const OBSTACLE_SCORE = 150, OBSTACLE_MAX = 25;
 const PORTAL_SCORE = 400, PORTAL_MAX_PAIRS = 2;
 const PORTAL_DURATION = 15000;
@@ -152,8 +195,12 @@ const PORTAL_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a06cd5'];
 const WIN_SCORE = 300;
 
 // ★ 棋盘皮肤（全局）+ 双人选择缓存
-let boardSkinId = localStorage.getItem('snakeBoardSkin') || localStorage.getItem('snakeCurrentSkin') || 'default';
-if (!SKINS[boardSkinId]) boardSkinId = 'default';
+// 从存档读出来的皮肤 id 必须真实存在，否则回退默认皮肤（避免脏数据导致画面空白）
+function readSkinId(key) {
+  const id = SM.getString(key, '');
+  return SKINS[id] ? id : '';
+}
+let boardSkinId = readSkinId('snakeBoardSkin') || readSkinId('snakeCurrentSkin') || 'default';
 let currentSkinId = boardSkinId;
 let p1SkinId = 'default';
 let p2SkinId = 'default';
@@ -166,13 +213,17 @@ let snake = null, direction = {x:1,y:0}, nextDirection = {x:1,y:0};
 let currentPlayer = null;
 
 // ===== 资源 =====
-const CAT_ASSET = new Image();
-const TIGER_ASSETS = { head: new Image(), body: new Image(), food: new Image(), leaf: new Image() };
-const RABBIT_ASSETS = { head: new Image(), body: new Image(), food: new Image(), paw: new Image() };
-const DRAGON_ASSETS = { head: new Image(), decor: new Image(), food: new Image(), tail: new Image() };
-const SNAKE_ASSETS = { head: new Image(), tail: new Image(), food: new Image(), drop: new Image(), leaf: new Image() };
-const HORSE_ASSETS = { head: new Image(), tail: new Image(), food: new Image(), decor: new Image() };
-const SHEEP_ASSETS = { head: new Image(), tail: new Image(), food: new Image(), decor: new Image() };
+// 所有美术资源统一从本地图集 assets/atlas.png 裁剪，不再使用远程图床图片。
+// 每个 key 在 atlas.js 的 window.ATLAS_DATA.frames 中都有对应帧。
+const ASSET_KEYS = {
+  CAT: 'cat_head',
+  TIGER: { head: 'head', body: 'body', food: 'food', leaf: 'leaf' },
+  RABBIT: { head: 'rab_head', body: 'rab_body', food: 'rab_food', paw: 'rab_paw' },
+  DRAGON: { head: 'dragon_head', decor: 'dragon_decor', food: 'dragon_food', tail: 'dragon_tail' },
+  SNAKE: { head: 'snake_head', tail: 'snake_tail', food: 'snake_food', drop: 'snake_drop', leaf: 'snake_leaf' },
+  HORSE: { head: 'horse_head', tail: 'horse_tail', food: 'horse_food', decor: 'horse_decor' },
+  SHEEP: { head: 'sheep_head', tail: 'sheep_tail', food: 'sheep_food', decor: 'sheep_decor' }
+};
 
 
 // ===== 图集 =====
@@ -201,49 +252,29 @@ drawW, drawH
 return true;
 }
 
+// 帧查找缓存：drawFromAtlas 每帧被调用几十次（每个身体段一次），
+// 每次都要 frames[key] || frames[key+'.png'] 两次哈希查找 + 字符串拼接。
+// key 只有固定十几种，缓存后每帧查找降为一次 Map 取值。
+// atlasData 由 assets/atlas.js 在 game.js 之前写入 window.ATLAS_DATA，
+// 脚本加载后不再变化，因此缓存无需失效；null 结果也一并缓存，避免反复重查。
+const atlasFrameLookup = new Map();
+function getAtlasFrame(key) {
+  if (atlasFrameLookup.has(key)) return atlasFrameLookup.get(key);
+  let frame = null;
+  if (atlasData && atlasData.frames) {
+    frame = atlasData.frames[key] || atlasData.frames[key + '.png'] || null;
+  }
+  atlasFrameLookup.set(key, frame);
+  return frame;
+}
+
 // 按 key 从图集查找并绘制（兼容带/不带 .png 的 key）
 function drawFromAtlas(key, cx, cy, dpx) {
-if (!atlasData || !atlasData.frames) return false;
-const frame = atlasData.frames[key + '.png'] || atlasData.frames[key];
+if (!key) return false;
+const frame = getAtlasFrame(key);
 if (!frame) return false;
 return drawAtlasFrame(frame, cx, cy, dpx);
 }
-
-// 给每个老 Image 对象挂上对应的图集 key，让 drawImageHelper 能反查
-function buildAtlasKeyMap() {
-const map = {
-'head': TIGER_ASSETS.head,
-'body': TIGER_ASSETS.body,
-'food': TIGER_ASSETS.food,
-'leaf': TIGER_ASSETS.leaf,
-'rab_head': RABBIT_ASSETS.head,
-'rab_body': RABBIT_ASSETS.body,
-'rab_food': RABBIT_ASSETS.food,
-'rab_paw': RABBIT_ASSETS.paw,
-'dragon_head': DRAGON_ASSETS.head,
-'dragon_decor': DRAGON_ASSETS.decor,
-'dragon_food': DRAGON_ASSETS.food,
-'dragon_tail': DRAGON_ASSETS.tail,
-'snake_head': SNAKE_ASSETS.head,
-'snake_tail': SNAKE_ASSETS.tail,
-'snake_food': SNAKE_ASSETS.food,
-'snake_drop': SNAKE_ASSETS.drop,
-'snake_leaf': SNAKE_ASSETS.leaf,
-'horse_head': HORSE_ASSETS.head,
-'horse_tail': HORSE_ASSETS.tail,
-'horse_food': HORSE_ASSETS.food,
-'horse_decor': HORSE_ASSETS.decor,
-'sheep_head': SHEEP_ASSETS.head,
-'sheep_tail': SHEEP_ASSETS.tail,
-'sheep_food': SHEEP_ASSETS.food,
-'sheep_decor': SHEEP_ASSETS.decor,
-'cat_head': CAT_ASSET
-};
-Object.entries(map).forEach(([key, img]) => {
-if (img) img._atlasKey = key;
-});
-}
-buildAtlasKeyMap();
 
 
 const audio = new Audio(); audio.loop = true; audio.volume = 0.45; audio.preload = 'auto';
@@ -255,11 +286,27 @@ function stopBgm() { audio.pause(); currentBgmKey = ''; }
 function getGameStageKey() { return score >= 600 ? 'stage2' : (score >= 250 ? 'stage1' : 'stage0'); }
 function updateGameBgm() { if (musicEnabled && !isGameOver && !isPaused) playBgm(getGameStageKey()); }
 
-let unlocked = JSON.parse(localStorage.getItem(ACHIEVE_KEY) || '[]');
-highScore = parseInt(localStorage.getItem(HIGH_KEY) || '0');
-totalScoreAccum = parseInt(localStorage.getItem(TOTAL_KEY) || '0');
+// 成就列表：只保留真实存在的成就 id（防止脏数据让"已解锁 3/19"这类数字失真）
+const VALID_ACHIEVE_IDS = ACHIEVEMENTS.map(a => a.id);
+let unlocked = SM.getStringArray(ACHIEVE_KEY, VALID_ACHIEVE_IDS);
+highScore = SM.getInt(HIGH_KEY, 0, 0, 99999999);
+totalScoreAccum = SM.getInt(TOTAL_KEY, 0, 0, 999999999);
 highScoreEl.textContent = highScore;
-function saveAchievements() { localStorage.setItem(ACHIEVE_KEY, JSON.stringify(unlocked)); localStorage.setItem(TOTAL_KEY, totalScoreAccum); }
+function saveAchievements() {
+  SM.setJSON(ACHIEVE_KEY, unlocked);
+  SM.safeSet(TOTAL_KEY, String(totalScoreAccum));
+}
+
+// 最高分统一入口：只在真正破纪录时写盘并刷新界面
+// （种子局与双人模式不参与普通最高分，由调用处过滤）
+function updateHighScore(newScore) {
+  if (gameMode !== 'single' || currentSeedId !== null) return;
+  const s = parseInt(newScore, 10);
+  if (!Number.isFinite(s) || s <= highScore) return;
+  highScore = s;
+  if (highScoreEl) highScoreEl.textContent = highScore;
+  SM.safeSet(HIGH_KEY, String(highScore));
+}
 
 const BASE_SPEED = 160, MIN_SPEED = 70;
 function calcSpeed() { const step = Math.floor(score/50); return Math.max(MIN_SPEED, BASE_SPEED - step*6); }
@@ -297,15 +344,10 @@ function playEatSound(playerId, isSpecial, comboCount) {
 }
 document.addEventListener('touchstart', () => { try { if (navigator.vibrate) navigator.vibrate(1); } catch(e) {} }, { once: true });
 
-function drawImageHelper(img, cx, cy, dpx) {
-// 优先从图集绘制
-if (img && img._atlasKey && drawFromAtlas(img._atlasKey, cx, cy, dpx)) return true;
-// 回退到原 Image 对象（图集没加载成功时）
-if (!img || !img.complete || !img.naturalWidth) return false;
-const s = dpx / img.naturalWidth;
-const w = img.naturalWidth * s, h = img.naturalHeight * s;
-ctx.drawImage(img, cx - w/2, cy - h/2, w, h);
-return true;
+// 统一的素材绘制入口：传入图集 key，从本地图集裁剪出对应画面。
+// 图集未就绪或该帧缺失时返回 false，调用方用矢量图形兜底。
+function drawImageHelper(key, cx, cy, dpx) {
+return drawFromAtlas(key, cx, cy, dpx);
 }
 function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
 function isWarmSkin(skinId) { return ['shu','niu','hu','tu','long','she','ma','yang'].includes(skinId); }
@@ -346,7 +388,8 @@ return {
   longHitCatCount: 0,
   longFireUntil: 0,
   longFireCells: null,
-  yangLeft: 0
+  yangLeft: 0,
+  coopWaiting: false   // ★ 合作模式复活等待：true 时停在出生点不动，等玩家按方向
 };
 }
 
@@ -397,6 +440,7 @@ snakes.push(createPlayer('p1', skinObj.headColors || ['#5efce8','#00f5d4','#00bb
 if (scoreEl.parentElement) { const lbl = scoreEl.parentElement.querySelector('.label'); if (lbl) lbl.textContent = '积分'; }
 score2Stat.style.display = 'none';
 } else {
+// ★ 合作模式与双人对战共用同一套出生点与皮肤配置，区别只在于生命结算规则
 const s1 = SKINS[p1SkinId] || SKINS.default;
 const s2 = SKINS[p2SkinId] || SKINS.default;
 snakes.push(createPlayer('p1', s1.headColors || ['#5efce8','#00f5d4','#00bbf9'], s1.bodyHue || {r:0,g:235,b:220}, 5, 5, {x:1,y:0}, p1SkinId));
@@ -407,14 +451,20 @@ score2El.textContent = '0';
 }
 snakes.forEach(p => applySkinPassive(p));
 score = 0; speed = BASE_SPEED;
-isPaused = false; isGameOver = false; isDying = false; particles = [];
+isPaused = false; isGameOver = false; isDying = false; particleCount = 0;   // 清空粒子（池对象保留复用）
 foodPulse = 0; shakeAmount = 0;
 accumulator = 0;
 cat = null; catActive = false; catTrail = []; catBiteLosses = 0;
 specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 0;
 obstacles = []; portals = []; portalPairCounter = 0;
+obstacleCells.clear();   // 同步清空石头查表，避免残留上一局的坐标
+snakes.forEach(p => { p.__cellSet = null; });
 maxLengthReached = 3; foodsEaten = 0; survivalTime = 0; fastEats = 0; cornerEaten = new Set();
 maxComboReached = 0;
+// ★ 合作模式：每局重置共享生命与复活冷却
+sharedLives = COOP_LIVES;
+snakes.forEach(p => { p.coopWaiting = false; });
+updateCoopLivesHud();
 thisRunHasLuopan = false;
 thisRunHasLuopanP1 = false;
 thisRunHasLuopanP2 = false;
@@ -476,7 +526,7 @@ function applyEquippedItem() {
     if (!equippedItem) return;
     const item = applyItemToPlayer(snakes[0], equippedItem, 'single');
     equippedItem = '';
-    localStorage.removeItem(EQUIPPED_KEY);
+    SM.safeRemove(EQUIPPED_KEY);
     if (item) showCheatToast('✨ 使用了「' + item.name + '」', 700);
   } else {
     const names = [];
@@ -484,13 +534,13 @@ function applyEquippedItem() {
       const item = applyItemToPlayer(snakes[0], equippedItemP1, 'p1');
       if (item) names.push('P1「' + item.name + '」');
       equippedItemP1 = '';
-      localStorage.removeItem(EQUIPPED_P1_KEY);
+      SM.safeRemove(EQUIPPED_P1_KEY);
     }
     if (equippedItemP2) {
       const item = applyItemToPlayer(snakes[1], equippedItemP2, 'p2');
       if (item) names.push('P2「' + item.name + '」');
       equippedItemP2 = '';
-      localStorage.removeItem(EQUIPPED_P2_KEY);
+      SM.safeRemove(EQUIPPED_P2_KEY);
     }
     if (names.length) showCheatToast('✨ 使用了 ' + names.join(' · '), 800);
   }
@@ -541,7 +591,9 @@ if (specialFood && specialFood.x===x && specialFood.y===y) continue;
 if (obstacles.some(o=>o.x===x&&o.y===y)) continue;
 if (portals.some(p=>p.x===x&&p.y===y)) continue;
 if (cat && cat.x===x && cat.y===y) continue;
-obstacles.push({x,y}); break;
+obstacles.push({x,y});
+obstacleCells.add(obstacleKey(x, y));   // 同步查表
+break;
 }
 }
 function trySpawnPortal() {
@@ -570,8 +622,57 @@ const color = PORTAL_COLORS[(portalPairCounter-1)%PORTAL_COLORS.length];
 positions.forEach(pos => portals.push({x:pos.x, y:pos.y, pairId:portalPairCounter, color:color, timer:PORTAL_DURATION}));
 showCheatToast('🌀 传送门出现！');
 }
-function spawnParticles(x, y, color) { for (let i=0;i<14;i++) { const a=(Math.PI*2*i)/14+Math.random()*0.5; const s=1.8+Math.random()*2.8; particles.push({x:x*GRID+GRID/2,y:y*GRID+GRID/2,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,decay:0.022+Math.random()*0.02,size:2.5+Math.random()*3.5,color}); } }
-function updateParticles() { for (let i=particles.length-1;i>=0;i--) { const p=particles[i]; p.x+=p.vx; p.y+=p.vy; p.vx*=0.95; p.vy*=0.95; p.life-=p.decay; if (p.life<=0) particles.splice(i,1); } }
+// ===== 粒子系统（对象池）=====
+// 原来每颗粒子都 new 一个对象、死亡时用 splice 从数组中挖掉，
+// 导致频繁的小对象分配和数组搬移，长时间游玩会出现周期性 GC 尖刺。
+// 现在改为：预分配固定大小的粒子池，用"存活数量 + 原地压缩"管理，
+// 粒子对象从头到尾只创建一次，永不 new、永不 splice。
+// 视觉表现与原来完全一致：同一套速度/生命衰减/半径公式。
+const PARTICLE_POOL_MAX = 420;
+const particlePool = new Array(PARTICLE_POOL_MAX);
+for (let i = 0; i < PARTICLE_POOL_MAX; i++) {
+  particlePool[i] = { x: 0, y: 0, vx: 0, vy: 0, life: 0, decay: 0, size: 0, color: '#fff' };
+}
+let particleCount = 0;   // 当前存活粒子数，始终占用 particlePool 的前 count 个
+
+function spawnParticles(x, y, color) {
+  for (let i = 0; i < 14; i++) {
+    // 池满时丢弃新粒子（比无限增长更安全，正常玩法下 420 足够）
+    if (particleCount >= PARTICLE_POOL_MAX) break;
+    const pt = particlePool[particleCount++];
+    const a = (Math.PI * 2 * i) / 14 + Math.random() * 0.5;
+    const s = 1.8 + Math.random() * 2.8;
+    pt.x = x * GRID + GRID / 2;
+    pt.y = y * GRID + GRID / 2;
+    pt.vx = Math.cos(a) * s;
+    pt.vy = Math.sin(a) * s;
+    pt.life = 1;
+    pt.decay = 0.022 + Math.random() * 0.02;
+    pt.size = 2.5 + Math.random() * 3.5;
+    pt.color = color;
+  }
+}
+
+function updateParticles() {
+  // 原地压缩：把还活着的粒子往前挪，最后把 count 收缩到存活数量。
+  // 不使用 splice，避免每次删除都搬移后半段数组。
+  let write = 0;
+  for (let read = 0; read < particleCount; read++) {
+    const p = particlePool[read];
+    p.x += p.vx; p.y += p.vy;
+    p.vx *= 0.95; p.vy *= 0.95;
+    p.life -= p.decay;
+    if (p.life > 0) {
+      if (write !== read) {
+        const t = particlePool[write];
+        t.x = p.x; t.y = p.y; t.vx = p.vx; t.vy = p.vy;
+        t.life = p.life; t.decay = p.decay; t.size = p.size; t.color = p.color;
+      }
+      write++;
+    }
+  }
+  particleCount = write;
+}
 
 function spawnCat() {
 let valid = false, catX = 5, catY = 5, attempts = 0;
@@ -680,8 +781,53 @@ visited.add(key); queue.push({x:nx,y:ny});
 return true;
 }
 
+// ===== 合作模式共享生命 HUD =====
+// 三条生命用 ❤ / 🤍 显示，进游戏才出现，单人与双人模式下自动隐藏
+function setCoopLivesHudVisible(visible) {
+  const el = document.getElementById('coopLives');
+  if (!el) return;
+  el.style.display = visible ? 'flex' : 'none';
+}
+function updateCoopLivesHud() {
+  if (gameMode !== 'coop') { setCoopLivesHudVisible(false); return; }
+  const el = document.getElementById('coopLives');
+  if (!el) return;
+  const hearts = document.getElementById('coopHearts');
+  if (hearts) {
+    let s = '';
+    for (let i = 0; i < COOP_LIVES; i++) s += (i < sharedLives ? '❤️' : '🤍');
+    hearts.textContent = s;
+  }
+  const num = document.getElementById('coopLivesNum');
+  if (num) num.textContent = sharedLives;
+  setCoopLivesHudVisible(true);
+}
+window.__updateCoopLivesHud = updateCoopLivesHud;
+
 function killPlayer(player, reason) {
 if (!player || !player.alive) return;
+// ★ 合作模式：按玩家 id 取出生点，死亡后原地重置回出生位置
+function coopSpawnOf(p) { return COOP_SPAWN[p.id] || { x: 12, y: 15, dir: { x: 1, y: 0 } }; }
+// ★ 合作模式复活的统一处理：重置蛇身到出生点、清空尾巴痕迹、给一段无敌时间防连死
+function coopRespawn(p) {
+  const sp = coopSpawnOf(p);
+  p.body = [{ x: sp.x, y: sp.y }];
+  for (let i = 1; i <= 2; i++) p.body.push({ x: sp.x - sp.dir.x * i, y: sp.y - sp.dir.y * i });
+  p.dir = { ...sp.dir }; p.nextDir = { ...sp.dir };
+  p.body.forEach(s => { if (s.x < 0 || s.x >= COLS || s.y < 0 || s.y >= ROWS) { s.x = Math.max(0, Math.min(COLS-1, s.x)); s.y = Math.max(0, Math.min(ROWS-1, s.y)); } });
+  p.alive = true;
+  p.shield = false;
+  // 复活后 3 秒无敌：足够玩家重新观察局面并瞄准方向，避免"刚回来又被秒"
+  p.invincibleUntil = performance.now() + 3000;
+  // 复活等待：这段时间内蛇停在出生点不动，等玩家按出方向再启动，
+  // 否则默认朝出生朝向直冲，几格之后就撞墙，等于白送一条命。
+  p.coopWaiting = true;
+  p.ghostTrail = [];
+  p.comboCount = 0; p.comboTimer = 0;
+  p.__cellSet = null;
+  spawnParticles(sp.x, sp.y, p.id === 'p1' ? '#00f5d4' : '#f15bb5');
+  spawnParticles(sp.x, sp.y, '#ffffff');
+}
 if (player.hasXuming && !player.xumingUsed) {
   player.xumingUsed = true;
   player.score = Math.floor(player.score / 2);
@@ -725,6 +871,20 @@ if (player.body && player.body.length) {
 player.body.forEach((s,i) => { if (s && i%2===0) spawnParticles(s.x, s.y, player.id === 'p1' ? '#00f5d4' : '#f15bb5'); });
 }
 if (gameMode === 'single') { gameOver(reason); return; }
+// ★ 合作模式：不立即结束，先扣共享生命；还有命就把蛇放回出生点继续打
+if (gameMode === 'coop') {
+  sharedLives--;
+  updateCoopLivesHud();
+  // 顺手清掉咬死玩家的野猫，避免复活瞬间又被同一只猫秒杀
+  if (reason && reason.includes('野猫')) { catActive = false; cat = null; catTrail = []; catBiteLosses = 0; }
+  if (sharedLives <= 0) {
+    gameOver((reason || '阵亡') + ' · 共享生命耗尽 · 双人合计 ' + snakes.reduce((a,p)=>a+(p.score||0),0) + ' 分');
+    return;
+  }
+  showCheatToast('💔 ' + player.id.toUpperCase() + ' 阵亡！共享生命剩余 ' + sharedLives + ' 条，即将复活', 1400);
+  coopRespawn(player);
+  return;
+}
 const alive = snakes.filter(p => p.alive);
 if (alive.length <= 1) {
 const winner = alive[0];
@@ -739,15 +899,17 @@ if (isGameOver) return;
 const hintEl = document.getElementById('recordHint');
 if (hintEl) hintEl.classList.remove('show');
 isGameOver = true; isDying = true;
+// ★ 结算界面不再显示共享生命条，避免和结算文案重复
+setCoopLivesHudVisible(false);
 
 const finalScore = gameMode === 'single' ? score : snakes.reduce((a,p)=>a+(p.score||0),0);
 
 // ★ 种子模式：独立结算，不写金币/统计/成就
 if (currentSeedId !== null && gameMode === 'single') {
   const key = SEED_HIGH_KEY_PREFIX + currentSeedId;
-  const oldBest = parseInt(localStorage.getItem(key) || '0');
+  const oldBest = SM.getInt(key, 0, 0, 99999999);
   const isNewRecord = score > oldBest;
-  if (isNewRecord) localStorage.setItem(key, String(score));
+  if (isNewRecord) SM.safeSet(key, String(score));
   const seedLevel = SEED_LEVELS.find(s => s.id === currentSeedId);
   const best = isNewRecord ? score : oldBest;
 
@@ -775,13 +937,15 @@ if (currentSeedId !== null && gameMode === 'single') {
 
     // ★ 种子模式专属：提交排行榜成绩
     setTimeout(() => {
-      let playerName = localStorage.getItem('snakePlayerName');
+      let playerName = SM.getString('snakePlayerName', '');
       if (!playerName) {
         playerName = prompt('🏆 恭喜完成挑战！输入你的江湖名号，登上排行榜吧：', '无名侠客');
       }
-      if (playerName && playerName.trim()) {
-        localStorage.setItem('snakePlayerName', playerName.trim());
-        submitLeaderboardScore(currentSeedId, playerName.trim(), score, snakes[0] ? snakes[0].body.length : 3);
+      // 名字做长度限制，避免超长名字撑破排行榜布局
+      const cleanName = (playerName || '').trim().slice(0, 15);
+      if (cleanName) {
+        SM.safeSet('snakePlayerName', cleanName);
+        submitLeaderboardScore(currentSeedId, cleanName, score, snakes[0] ? snakes[0].body.length : 3);
       }
     }, 500);
   }, 1200);
@@ -791,7 +955,9 @@ if (currentSeedId !== null && gameMode === 'single') {
 // 普通模式：原逻辑
 let coinBonus = 0;
 if (gameMode === 'single' && boardSkinId === 'shu') coinBonus = 0.15;
+// ★ 合作模式也吃棋盘皮肤的加成（与双人一致：P1/P2 任一选了鼠皮肤即生效）
 else if (gameMode === 'double' && (p1SkinId === 'shu' || p2SkinId === 'shu')) coinBonus = 0.15;
+else if (gameMode === 'coop' && (p1SkinId === 'shu' || p2SkinId === 'shu')) coinBonus = 0.15;
 
 const earnedCoins = Math.floor(finalScore / 10 * (1 + coinBonus));
 coins += earnedCoins;
@@ -799,6 +965,7 @@ saveCoins();
 
 stats.totalGames++;
 if (gameMode === 'single') stats.singleGames++;
+else if (gameMode === 'coop') stats.coopGames = (stats.coopGames || 0) + 1;
 else stats.doubleGames++;
 
 if (gameMode === 'single') {
@@ -833,7 +1000,7 @@ setTimeout(() => {
   isDying = false;
   stopLoop();
   overlayTitle.textContent = '修炼失败';
-  overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && snakes[0] && snakes[0].body ? (' · 积分 '+score+' · 体长 '+snakes[0].body.length) : '') + ' · 🪙 +' + earnedCoins;
+  overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && snakes[0] && snakes[0].body ? (' · 积分 '+score+' · 体长 '+snakes[0].body.length) : (gameMode === 'coop' ? (' · 双人合计积分 '+finalScore) : '')) + ' · 🪙 +' + earnedCoins;
   startBtn.textContent = '再次入世';
   overlay.classList.remove('hidden');
   playBgm('menu');
@@ -848,6 +1015,34 @@ setTimeout(() => {
 }, 1200);
 }
 
+// ===== 碰撞查表 =====
+// 原来的碰撞检测每走一步都要线性扫描石头数组和整条蛇身（body.some），
+// 石头 25 块 + 蛇长 60 时，单步就是 85 次比较，双人模式还要再翻倍。
+// 这里维护一个 "x,y" → true 的 Set，把每次比较降到 O(1)。
+// 关键：Set 必须与实际数组保持一致，因此所有增删石头的地方都会同步更新它。
+const obstacleCells = new Set();
+function obstacleKey(x, y) { return x + ',' + y; }
+function rebuildObstacleCells() {
+  obstacleCells.clear();
+  for (let i = 0; i < obstacles.length; i++) obstacleCells.add(obstacleKey(obstacles[i].x, obstacles[i].y));
+}
+function hasObstacleAt(x, y) { return obstacleCells.has(obstacleKey(x, y)); }
+// 原地删除石头：先标记再剔除，避免 filter 每步新建数组；同时同步查表
+function removeObstacleAt(x, y) {
+  const k = obstacleKey(x, y);
+  if (!obstacleCells.has(k)) return;
+  obstacleCells.delete(k);
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    if (obstacles[i].x === x && obstacles[i].y === y) obstacles.splice(i, 1);
+  }
+}
+// 蛇身查表：每个玩家一条，身体每步都会变化，因此按需重建
+function buildBodySet(body) {
+  const s = new Set();
+  if (body) for (let i = 0; i < body.length; i++) s.add(obstacleKey(body[i].x, body[i].y));
+  return s;
+}
+
 function update() {
 if (isPaused || isGameOver) return;
 if (specialFood) { specialFoodTimer -= speed; if (specialFoodTimer <= 0) { specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 2000; } }
@@ -857,14 +1052,34 @@ const pairsToRemove = new Set();
 portals.forEach(p => { p.timer -= speed; if (p.timer <= 0) pairsToRemove.add(p.pairId); });
 if (pairsToRemove.size > 0) portals = portals.filter(p => !pairsToRemove.has(p.pairId));
 }
-if (!catActive && catModeEnabled && gameMode === 'single' && score >= CAT_ACTIVATE_SCORE) spawnCat();
+if (!catActive && catModeEnabled && (gameMode === 'single' || gameMode === 'coop') && score >= CAT_ACTIVATE_SCORE) spawnCat();
 const alivePlayers = snakes.filter(p => p.alive);
 if (alivePlayers.length === 0) return;
+// ★ 合作模式：如果对方已经在出生点附近，就再多给一点无敌余量，
+//    避免复活瞬间被队友的身体直接顶死（两人同时复活时尤其需要）。
+if (gameMode === 'coop') {
+  for (let gi = 0; gi < snakes.length; gi++) {
+    const gp = snakes[gi];
+    if (!gp.alive || !gp.coopWaiting) continue;
+    const sp = COOP_SPAWN[gp.id];
+    if (!sp) continue;
+    const other = snakes.find(o => o !== gp && o.alive && o.body && o.body[0]);
+    if (other && Math.abs(other.body[0].x - sp.x) + Math.abs(other.body[0].y - sp.y) < 6) {
+      gp.invincibleUntil = Math.max(gp.invincibleUntil, performance.now() + 500);
+    }
+  }
+}
 const nowTs = performance.now();
 for (let idx = 0; idx < snakes.length; idx++) {
 const p = snakes[idx];
 if (!p.alive) continue;
 if (!p.body || p.body.length === 0) continue;
+// ★ 合作模式复活等待：蛇停在出生点不动，等玩家主动按下方向键才重新出发。
+//    这样新增的共享生命才是"救人"而不是"送命"，也不会因为默认朝向直冲撞墙而连死。
+if (p.coopWaiting) {
+  p.survivalTime += 0;   // 等待期间不累计生存时间
+  continue;
+}
 snake = p.body; direction = p.dir; nextDirection = p.nextDir; currentPlayer = p;
 let curSpeed = speed;
 if (p.speedMultiplier && p.speedMultiplier > 1) curSpeed = curSpeed / p.speedMultiplier;
@@ -878,8 +1093,8 @@ if (p.ghostMode && nowTs >= p.ghostUntil) {
   p.ghostMode = false;
   if (p.body && p.body[0]) {
     const hx = p.body[0].x, hy = p.body[0].y;
-    if (obstacles.some(o => o.x === hx && o.y === hy)) {
-      obstacles = obstacles.filter(o => !(o.x === hx && o.y === hy));
+    if (hasObstacleAt(hx, hy)) {
+      removeObstacleAt(hx, hy);
       spawnParticles(hx, hy, '#a06cd5');
     }
   }
@@ -898,6 +1113,12 @@ if (!snake[0]) continue;
 const head = { x: snake[0].x + direction.x, y: snake[0].y + direction.y };
 const isInvincible = nowTs < (p.invincibleUntil || 0);
 
+// ★ 本步的碰撞查表：
+//   selfBodySet 用"加头之前"的身体构建，这样蛇尾让出的格子仍可进入（和原来 some() 行为一致）；
+//   同时把这条蛇的查表挂到 p.__cellSet 上，供其他玩家做"撞到对方"的 O(1) 判断。
+const selfBodySet = buildBodySet(snake);
+p.__cellSet = selfBodySet;
+
 if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS) {
 if (isInvincible) { p.dir = direction; p.nextDir = nextDirection; continue; }
 if (p.shield) { p.shield = false; p.invincibleUntil = nowTs + 1200; showCheatToast('🛡️ 护盾抵挡了墙壁！', 700); p.dir = direction; p.nextDir = nextDirection; continue; }
@@ -914,19 +1135,19 @@ spawnParticles(pair.x, pair.y, pair.color);
 showCheatToast('🌀 传送门穿越！');
 }
 }
-if (obstacles.some(o => o.x === head.x && o.y === head.y)) {
+if (hasObstacleAt(head.x, head.y)) {
 if (isGhost) {
   spawnParticles(head.x, head.y, '#a06cd5');
 } else if (isInvincible) { p.dir = direction; p.nextDir = nextDirection; continue; }
 else if (p.shield) {
 p.shield = false;
 p.invincibleUntil = nowTs + 1200;
-obstacles = obstacles.filter(o => !(o.x === head.x && o.y === head.y));
+removeObstacleAt(head.x, head.y);
 showCheatToast('🛡️ 护盾撞碎了石头！', 700);
 p.dir = direction; p.nextDir = nextDirection; continue;
 } else if (p.niuShieldLeft > 0) {
 p.niuShieldLeft--;
-obstacles = obstacles.filter(o => !(o.x === head.x && o.y === head.y));
+removeObstacleAt(head.x, head.y);
 shakeAmount = 22;
 vibrate([80,40,80]);
 spawnParticles(head.x, head.y, '#ffaa00');
@@ -935,7 +1156,7 @@ showCheatToast('🐮 牛符咒·铁壁！撞碎石头（剩余 ' + p.niuShieldLe
 p.dir = direction; p.nextDir = nextDirection; continue;
 } else { killPlayer(p, '撞到石头了'); continue; }
 }
-if (snake.some(s => s.x === head.x && s.y === head.y)) {
+if (selfBodySet.has(obstacleKey(head.x, head.y))) {
 if (isGhost) {
   spawnParticles(head.x, head.y, '#a06cd5');
 } else if (isInvincible) { p.dir = direction; p.nextDir = nextDirection; continue; }
@@ -947,7 +1168,11 @@ for (let j = 0; j < snakes.length; j++) {
 if (j === idx) continue;
 const other = snakes[j];
 if (!other.alive || !other.body) continue;
-if (other.body.some(s => s.x === head.x && s.y === head.y)) { hitOther = true; break; }
+// 优先走查表；若对方本帧还没建立查表（例如刚复活/首帧），回退到线性扫描兜底，
+// 保证判定结果与原来完全一致，不会漏判。
+if (other.__cellSet) {
+  if (other.__cellSet.has(obstacleKey(head.x, head.y))) { hitOther = true; break; }
+} else if (other.body.some(s => s.x === head.x && s.y === head.y)) { hitOther = true; break; }
 }
 if (hitOther) {
 if (isGhost) {
@@ -990,12 +1215,14 @@ spawnParticles(food.x, food.y, '#ff6b6b'); spawnParticles(food.x, food.y, '#00f5
 placeFood();
 let specialChance = 0.35;
 if (gameMode === 'single' && thisRunHasLuopan) specialChance = 0.7;
-else if (gameMode === 'double' && (thisRunHasLuopanP1 || thisRunHasLuopanP2)) specialChance = 0.7;
+else if ((gameMode === 'double' || gameMode === 'coop') && (thisRunHasLuopanP1 || thisRunHasLuopanP2)) specialChance = 0.7;
 if (!specialFood && gameRng() < specialChance) spawnSpecialFood();
 if (p.foodsEaten % 3 === 0) trySpawnObstacle();
 if (p.foodsEaten % 15 === 0) trySpawnPortal();
-if (gameMode === 'single' && currentSeedId === null && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
+updateHighScore(p.score);
 if (gameMode === 'double' && p.score >= WIN_SCORE) { const other = snakes.find(x=>x.id!==p.id); if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分'); }
+// ★ 合作模式没有"率先到达"的胜负概念，双方同队，达到目标分直接失败结束
+if (gameMode === 'coop' && p.score >= WIN_SCORE) { gameOver('合作达成！双人合计突破 ' + WIN_SCORE + ' 分目标 · 剩余生命 ' + sharedLives); return; }
 lengthEl.textContent = p.body.length;
 } else if (specialFood && head.x === specialFood.x && head.y === specialFood.y) {
 ateSomething = true; p.foodsEaten++;
@@ -1031,8 +1258,10 @@ if (p.id === 'p1') scoreEl.textContent = p.score; else score2El.textContent = p.
 p.maxLen = Math.max(p.maxLen, p.body.length);
 showScorePop(specialFood.x, specialFood.y, p.id, baseScore, multiplier);
 spawnParticles(specialFood.x, specialFood.y, '#ffaa00'); spawnParticles(specialFood.x, specialFood.y, '#ffffff');
-if (gameMode === 'single' && currentSeedId === null && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
+updateHighScore(p.score);
 if (gameMode === 'double' && p.score >= WIN_SCORE) { const other = snakes.find(x=>x.id!==p.id); if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分'); }
+// ★ 合作模式：同样以 300 分作为目标达成条件（达到即通关结算）
+if (gameMode === 'coop' && p.score >= WIN_SCORE) { gameOver('合作达成！双人合计突破 ' + WIN_SCORE + ' 分目标 · 剩余生命 ' + sharedLives); return; }
 specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 3000;
 }
 if (!ateSomething && snake.length > 0) snake.pop();
@@ -1060,12 +1289,13 @@ if (p) {
 p.score += 50;
 if (gameMode === 'single') score = p.score;
 scoreEl.textContent = p.score;
-if (gameMode === 'single' && currentSeedId === null && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
+updateHighScore(p.score);
 }
 showCheatToast('🎉 你围死了野猫！奖励 50 分！');
 spawnParticles(cx, cy, '#ffaa00'); spawnParticles(cx, cy, '#ff4444');
 }
 const aliveNow = snakes.filter(p => p.alive);
+// ★ 合作模式的结束条件由 sharedLives 在 killPlayer 里负责，这里不再判"只剩一人"
 if (gameMode === 'double' && aliveNow.length <= 1) {
 if (aliveNow.length === 1) gameOver('对手已阵亡 · ' + aliveNow[0].id.toUpperCase() + ' 获胜！');
 else gameOver('双方阵亡 · 平局！');
@@ -1106,7 +1336,13 @@ if (inner) inner.appendChild(pop);
 setTimeout(()=>pop.remove(), 850);
 }
 
+// 本帧统一时间戳：绘制阶段有近十处需要"当前时间"，原来每处各调一次
+// performance.now()，重复且结果不一致。现在在 draw() 开头取一次，
+// 本帧内所有动画相位（传送门旋转、闪烁透明度、火焰/幻影剩余时间）统一用它。
+let drawNowTs = 0;
+
 function draw() {
+drawNowTs = performance.now();
 ctx.save();
 let shakeX=0, shakeY=0;
 if (shakeAmount > 0.1) { shakeX = (Math.random()-0.5)*shakeAmount; shakeY = (Math.random()-0.5)*shakeAmount; shakeAmount *= 0.90; } else { shakeAmount = 0; }
@@ -1115,10 +1351,7 @@ const boardSkin = SKINS[boardSkinId] || SKINS.default;
 if (isWarmSkin(boardSkinId)) {
 drawWarmBoard(boardSkinId);
 } else {
-ctx.fillStyle = boardSkin.boardBg; ctx.fillRect(0,0,LOGICAL_SIZE,LOGICAL_SIZE);
-ctx.strokeStyle = boardSkin.gridColor; ctx.lineWidth = 1.2;
-for (let i=0; i<=COLS; i++) { ctx.beginPath(); ctx.moveTo(i*GRID,0); ctx.lineTo(i*GRID,LOGICAL_SIZE); ctx.stroke(); }
-for (let i=0; i<=ROWS; i++) { ctx.beginPath(); ctx.moveTo(0,i*GRID); ctx.lineTo(LOGICAL_SIZE,i*GRID); ctx.stroke(); }
+drawPlainBoard(boardSkin);
 }
 obstacles.forEach(o => drawObstacle(o));
 portals.forEach(p => drawPortal(p));
@@ -1127,8 +1360,8 @@ drawFood(food, boardSkin);
 if (specialFood) drawSpecialFood(specialFood);
 
 snakes.forEach(p => {
-  if (!p.longFireCells || performance.now() >= p.longFireUntil) return;
-  const now = performance.now();
+  if (!p.longFireCells || drawNowTs >= p.longFireUntil) return;
+  const now = drawNowTs;
   const life = Math.max(0, (p.longFireUntil - now) / 400);
   p.longFireCells.forEach((cell, i) => {
     const fx = cell.x * GRID + GRID/2;
@@ -1145,8 +1378,8 @@ snakes.forEach(p => {
 });
 
 snakes.forEach(p => {
-  if (!p.phantomData || performance.now() >= p.phantomUntil) return;
-  const now = performance.now();
+  if (!p.phantomData || drawNowTs >= p.phantomUntil) return;
+  const now = drawNowTs;
   const remain = (p.phantomUntil - now) / 5000;
   const alpha = 0.25 + 0.35 * remain;
   const ph = p.phantomData;
@@ -1199,79 +1432,264 @@ snakes.forEach((p) => {
   ctx.fillRect(hx - barW/2, hy - GRID * 0.95, barW * ratio, barH);
   ctx.restore();
 });
-particles.forEach(p => { ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2); ctx.fill(); });
+// 粒子绘制：直接遍历池的前 count 个（无需 slice，零分配）
+for (let pi = 0; pi < particleCount; pi++) {
+  const p = particlePool[pi];
+  ctx.globalAlpha = p.life; ctx.fillStyle = p.color;
+  ctx.beginPath(); ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2); ctx.fill();
+}
 ctx.globalAlpha = 1;
 ctx.restore();
 }
 
+// ★ 棋盘缓存：
+//   暖色棋盘每个皮肤的画法是纯静态的（棋盘格、网格线、装饰图案都不随时间变化），
+//   但原来每帧都要重画 900 个格子 + 几十个装饰图形，实测「兔」皮肤单帧要 5.5ms，
+//   一帧预算才 16.6ms，光背景就吃掉三分之一。
+//   现在改成：首次绘制某个皮肤时离屏渲染一张整版画布缓存起来，之后每帧只做一次
+//   drawImage 贴图。视觉输出与原来逐像素一致，只是不再重复算。
+const warmBoardCache = {};
+// 图集未加载完成时不建缓存：否则会把"图集兜底的圆形占位"永久烤进缓存，
+// 等图集加载好也不会自动更新。等图集就绪后再建缓存即可。
+function atlasReadyForCache() {
+  return !!(atlasImg && atlasImg.complete && atlasImg.naturalWidth);
+}
+function getWarmBoardCanvas(skinId) {
+  if (warmBoardCache[skinId]) return warmBoardCache[skinId];
+  const off = document.createElement('canvas');
+  off.width = LOGICAL_SIZE;
+  off.height = LOGICAL_SIZE;
+  const octx = off.getContext('2d');
+  // 复用原画法，只是把绘制目标从主画布临时换成离屏画布
+  const mainCtx = ctx;
+  ctx = octx;
+  try {
+    drawWarmBoardDirect(skinId);
+  } finally {
+    ctx = mainCtx;
+  }
+  warmBoardCache[skinId] = off;
+  return off;
+}
+
+// 棋盘变化时（关卡/皮肤切换）清缓存
+function invalidateWarmBoardCache(skinId) {
+  if (skinId) delete warmBoardCache[skinId];
+  else Object.keys(warmBoardCache).forEach(k => delete warmBoardCache[k]);
+}
+
+// 图集加载完成后，把此前可能用兜底图形烤出来的暖色棋盘缓存全部清掉重建
+if (atlasImg) {
+  atlasImg.addEventListener('load', () => invalidateWarmBoardCache());
+}
+
+// 对外保持同名同签名：命中缓存就直接贴图，未命中则先构建缓存
 function drawWarmBoard(skinId) {
-const light = skinId==='niu'?'#faf0dc':(skinId==='hu'?'#fff4e6':(skinId==='tu'?'#fff5f5':(skinId==='long'?'#f0faf5':(skinId==='she'?'#f2fbf0':(skinId==='ma'?'#fff8f0':(skinId==='yang'?'#f5f0ff':'#f8edd8'))))));
-const dark = skinId==='niu'?'#f0e0c0':(skinId==='hu'?'#ffe4cc':(skinId==='tu'?'#ffe4e8':(skinId==='long'?'#d4f0e5':(skinId==='she'?'#d9f0d4':(skinId==='ma'?'#f5e8d8':(skinId==='yang'?'#e8ddf5':'#f0e0c0'))))));
-for (let gy=0; gy<ROWS; gy++) for (let gx=0; gx<COLS; gx++) { ctx.fillStyle = (gx+gy)%2===0 ? light : dark; ctx.fillRect(gx*GRID, gy*GRID, GRID, GRID); }
-ctx.strokeStyle = skinId==='hu'?'rgba(230,160,100,0.35)':(skinId==='tu'?'rgba(255,150,170,0.35)':(skinId==='long'?'rgba(100,200,180,0.35)':(skinId==='she'?'rgba(130,200,120,0.35)':(skinId==='ma'?'rgba(210,170,130,0.35)':(skinId==='yang'?'rgba(180,140,200,0.35)':'rgba(200,170,120,0.35)')))));
-ctx.lineWidth = 0.8;
+  // 用到了图集但图集还没就绪 → 直接实时绘制，不写缓存（避免烤入兜底图形）
+  const usesAtlas = skinId !== 'shu' && skinId !== 'niu';
+  if (usesAtlas && !atlasReadyForCache()) {
+    drawWarmBoardDirect(skinId);
+    return;
+  }
+  const cached = warmBoardCache[skinId];
+  if (cached) { ctx.drawImage(cached, 0, 0, LOGICAL_SIZE, LOGICAL_SIZE); return; }
+  ctx.drawImage(getWarmBoardCanvas(skinId), 0, 0, LOGICAL_SIZE, LOGICAL_SIZE);
+}
+
+// 普通棋盘缓存：纯色底 + 网格线，同样是静态内容，只画一次
+const plainBoardCache = {};
+function drawPlainBoard(boardSkin) {
+  const key = (boardSkin && (boardSkin.id || boardSkin.boardBg)) || 'default';
+  let off = plainBoardCache[key];
+  if (!off) {
+    off = document.createElement('canvas');
+    off.width = LOGICAL_SIZE;
+    off.height = LOGICAL_SIZE;
+    const octx = off.getContext('2d');
+    octx.fillStyle = boardSkin.boardBg;
+    octx.fillRect(0, 0, LOGICAL_SIZE, LOGICAL_SIZE);
+    octx.strokeStyle = boardSkin.gridColor;
+    octx.lineWidth = 1.2;
+    for (let i = 0; i <= COLS; i++) { octx.beginPath(); octx.moveTo(i * GRID, 0); octx.lineTo(i * GRID, LOGICAL_SIZE); octx.stroke(); }
+    for (let i = 0; i <= ROWS; i++) { octx.beginPath(); octx.moveTo(0, i * GRID); octx.lineTo(LOGICAL_SIZE, i * GRID); octx.stroke(); }
+    plainBoardCache[key] = off;
+  }
+  ctx.drawImage(off, 0, 0, LOGICAL_SIZE, LOGICAL_SIZE);
+}
+
+// 原逐帧画法，改名保留：只用于构建缓存
+//
+// ★ 美术重做（统一深色基调）：
+//   旧版 8 套皮肤里有 7 套是米黄/粉白这类「浅色奶油棋盘」，只有 default 是深色。
+//   结果就是：玩 default 是深夜霓虹风，一切到「鼠」整个画布突然泛白，
+//   和四周深色 UI 面板撞在一起，非常跳。
+//   现在改成：所有棋盘都是深色底，只调色相与明度——
+//     鼠=暖棕  牛=墨绿  虎=琥珀  兔=玫红  龙=青碧  蛇=苔绿  马=栗棕  羊=藕紫
+//   这样每套皮肤依然有明显辨识度，但整机视觉是一个体系。
+function drawWarmBoardDirect(skinId) {
+// ---- 每套皮肤的深色双色格 ----
+// ★ 美术二次调整（按用户要求：不要统一风格，要「每套皮肤各有各的样子」）：
+//   上一版把所有棋盘都压成深色，虽然协调但丢了个性 —— 用户明确要的是「不同风格」。
+//   现在改为「保留亮暗两派 + 强化材质与配色差异」：
+//     · 亮派（暖）：鼠=米黄宣纸 / 虎=橙木 / 兔=樱粉 / 马=奶油
+//     · 亮派（冷）：牛=奶绿 / 龙=青瓷 / 蛇=薄荷 / 羊=藕荷
+//     · 暗派：经典青蛇=深夜霓虹
+//   亮派棋盘依然保留上一版新加的「径向纵深光 + 内描边 + 装饰」三层结构，
+//   所以它自己是完整的、不发灰；只是不再强行跟暗派统一。
+const BOARD_THEME = {
+  // ---- 亮派（暖）----
+  shu:  { mode:'light', light:'#f7ecd8', dark:'#efe1c6', grid:'rgba(168,124,72,0.30)', tint:'#c89b5a', deep:'#e6d3b0' },
+  hu:   { mode:'light', light:'#fff1e0', dark:'#ffe3c9', grid:'rgba(214,138,74,0.32)', tint:'#e0a55c', deep:'#f5d5b5' },
+  tu:   { mode:'light', light:'#fff2f5', dark:'#ffe4ea', grid:'rgba(224,124,156,0.30)', tint:'#e07fa8', deep:'#f7d6de' },
+  ma:   { mode:'light', light:'#fdf4e6', dark:'#f5e6d0', grid:'rgba(186,138,88,0.30)', tint:'#d99b57', deep:'#eeddc4' },
+  // ---- 亮派（冷）----
+  niu:  { mode:'light', light:'#f4f8ec', dark:'#e6efd8', grid:'rgba(122,166,88,0.30)', tint:'#6fbf8c', deep:'#dae8c8' },
+  long: { mode:'light', light:'#eef8f6', dark:'#dcefeb', grid:'rgba(70,168,152,0.30)', tint:'#4fd6c0', deep:'#c9e6e0' },
+  she:  { mode:'light', light:'#f1f8ea', dark:'#e2efd4', grid:'rgba(118,166,80,0.30)', tint:'#8fc860', deep:'#d5e8c2' },
+  yang: { mode:'light', light:'#f6f1fb', dark:'#eae1f7', grid:'rgba(148,116,196,0.30)', tint:'#a98cd8', deep:'#ded2f0' },
+  // ---- 暗派 ----
+  default: { mode:'dark', light:'#111826', dark:'#0c121d', grid:'rgba(0,200,220,0.10)', tint:'#00d4c0', deep:'#070a10' }
+}[skinId] || { mode:'dark', light:'#111826', dark:'#0c121d', grid:'rgba(0,200,220,0.10)', tint:'#00d4c0', deep:'#070a10' };
+const IS_LIGHT_BOARD = BOARD_THEME.mode === 'light';
+
+// 1) 打底：中心的径向光 + 边缘压深，给棋盘纵深。
+//    亮派和暗派的「压深终点」不同：暗派压到近黑，亮派只压到同色系更饱和的一档，
+//    这样亮派棋盘依然是「亮」的，只是四周比中间略沉，不会糊成一块死白。
+const vign = ctx.createRadialGradient(LOGICAL_SIZE/2, LOGICAL_SIZE/2, LOGICAL_SIZE*0.15, LOGICAL_SIZE/2, LOGICAL_SIZE/2, LOGICAL_SIZE*0.78);
+vign.addColorStop(0, BOARD_THEME.light);
+vign.addColorStop(0.55, BOARD_THEME.dark);
+vign.addColorStop(1, BOARD_THEME.deep);   // ← 不再硬编码 #070a10，改由皮肤自带
+ctx.fillStyle = vign;
+ctx.fillRect(0, 0, LOGICAL_SIZE, LOGICAL_SIZE);
+
+// 2) 棋盘格：只画「亮格」，暗格留给底色，用半透明叠加而不是实心填色。
+//    叠加色必须分派：深色底用白色叠加（提亮），亮色底用深色叠加（压深），
+//    否则在米黄棋盘上用白叠等于没画，棋盘格会彻底消失。
+ctx.fillStyle = IS_LIGHT_BOARD ? 'rgba(120,92,56,0.055)' : 'rgba(255,255,255,0.022)';
+for (let gy=0; gy<ROWS; gy++) for (let gx=0; gx<COLS; gx++) {
+  if ((gx+gy)%2 === 0) ctx.fillRect(gx*GRID, gy*GRID, GRID, GRID);
+}
+
+// 3) 网格线：带皮肤色相的极细线（亮/暗派各自的不透明度已写在 BOARD_THEME.grid 里）
+ctx.strokeStyle = BOARD_THEME.grid;
+ctx.lineWidth = IS_LIGHT_BOARD ? 0.9 : 0.7;
 for (let i=0; i<=COLS; i++) { ctx.beginPath(); ctx.moveTo(i*GRID,0); ctx.lineTo(i*GRID,LOGICAL_SIZE); ctx.stroke(); }
 for (let i=0; i<=ROWS; i++) { ctx.beginPath(); ctx.moveTo(0,i*GRID); ctx.lineTo(LOGICAL_SIZE,i*GRID); ctx.stroke(); }
+
+// 4) 内描边：给棋盘一圈淡淡的皮肤色内发光，像「框住了这个场」
+//    亮派底浅，要让描边更实一点才看得见，所以提高不透明度。
+ctx.strokeStyle = BOARD_THEME.tint + (IS_LIGHT_BOARD ? '5c' : '30');
+ctx.lineWidth = 2;
+ctx.strokeRect(1, 1, LOGICAL_SIZE-2, LOGICAL_SIZE-2);
+
+// 5) 各皮肤的装饰图案
+//    ★ 亮派底上的装饰不能用「低透明度深色」（会发灰发脏），
+//      这里统一走 DECO_ALPHA：亮派 0.62、暗派 0.50，
+//      具体图案内部的颜色在下面各自按明暗微调。
+const DECO_ALPHA = IS_LIGHT_BOARD ? 0.62 : 0.50;
 if (skinId === 'shu') {
-ctx.fillStyle = 'rgba(180,140,90,0.28)';
+// 鼠：脚印 + 小米粒，暖棕低饱和
+ctx.fillStyle = IS_LIGHT_BOARD ? 'rgba(176,132,78,0.42)' : 'rgba(200,155,100,0.20)';
 const paws = [[2,3],[6,10],[11,5],[17,14],[8,20],[23,8],[4,25],[20,22],[14,11],[26,17],[9,7],[18,26]];
 paws.forEach(([gx,gy]) => { const cx=gx*GRID+GRID/2, cy=gy*GRID+GRID/2; ctx.beginPath(); ctx.arc(cx,cy,3.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx-3.8,cy-2.8,1.8,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx+3.8,cy-2.8,1.8,0,Math.PI*2); ctx.fill(); });
-ctx.fillStyle = 'rgba(255,190,60,0.4)';
+ctx.fillStyle = IS_LIGHT_BOARD ? 'rgba(214,158,74,0.55)' : 'rgba(240,196,110,0.30)';
 [[5,6],[12,18],[19,4],[25,12],[3,16],[15,25],[22,20]].forEach(([gx,gy]) => { const cx=gx*GRID+GRID/2, cy=gy*GRID+GRID/2; ctx.beginPath(); for (let s=0;s<5;s++){const a=(s*4*Math.PI/5)-Math.PI/2; const r=s%2===0?3.5:1.5; ctx.lineTo(cx+Math.cos(a)*r, cy+Math.sin(a)*r);} ctx.closePath(); ctx.fill(); });
 } else if (skinId === 'niu') {
 const grassSpots = [[3,4],[8,12],[15,6],[21,18],[5,22],[24,9],[10,25],[18,3],[26,15],[12,16],[1,10],[28,5]];
 const leafPath = (w,h) => { ctx.beginPath(); ctx.moveTo(0,0); ctx.bezierCurveTo(-w/2,-h*0.22,-w/2,-h*0.74,0,-h); ctx.bezierCurveTo(w/2,-h*0.74,w/2,-h*0.22,0,0); ctx.closePath(); };
-const bladeSet = [{x:-5.5,h:7.5,w:4.2,rot:-0.78,c1:'#b9dd7b',c2:'#79ad3c'},{x:5.5,h:7.5,w:4.2,rot:0.78,c1:'#b9dd7b',c2:'#79ad3c'},{x:-3,h:10.5,w:4.8,rot:-0.40,c1:'#c2e385',c2:'#84b945'},{x:3,h:10.5,w:4.8,rot:0.40,c1:'#c2e385',c2:'#84b945'},{x:0,h:14,w:5.4,rot:0,c1:'#cbe894',c2:'#8fc44e'}];
-grassSpots.forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2+6; ctx.save(); ctx.translate(bx,by); ctx.scale(0.9,0.9); ctx.lineJoin='round'; ctx.fillStyle='rgba(150,120,60,0.20)'; ctx.beginPath(); ctx.ellipse(2,1,8.5,2.6,0,0,Math.PI*2); ctx.fill(); bladeSet.forEach(b => { ctx.save(); ctx.translate(b.x,0); ctx.rotate(b.rot); leafPath(b.w,b.h); ctx.fillStyle='#fffdf5'; ctx.strokeStyle='#fffdf5'; ctx.lineWidth=3.4; ctx.fill(); ctx.stroke(); ctx.restore(); }); bladeSet.forEach(b => { ctx.save(); ctx.translate(b.x,0); ctx.rotate(b.rot); leafPath(b.w,b.h); ctx.strokeStyle='#fffdf5'; ctx.lineWidth=2.2; ctx.stroke(); const lg=ctx.createLinearGradient(-b.w/2,0,b.w/2,0); lg.addColorStop(0,b.c1); lg.addColorStop(1,b.c2); leafPath(b.w,b.h); ctx.fillStyle=lg; ctx.fill(); ctx.restore(); }); ctx.restore(); });
+// 草叶在深色底上要降低饱和、提一点亮度，否则会糊成一团黑
+const bladeSet = [{x:-5.5,h:7.5,w:4.2,rot:-0.78,c1:'#8fbf6a',c2:'#5b8b3a'},{x:5.5,h:7.5,w:4.2,rot:0.78,c1:'#8fbf6a',c2:'#5b8b3a'},{x:-3,h:10.5,w:4.8,rot:-0.40,c1:'#9bca74',c2:'#659442'},{x:3,h:10.5,w:4.8,rot:0.40,c1:'#9bca74',c2:'#659442'},{x:0,h:14,w:5.4,rot:0,c1:'#a6d47e',c2:'#6f9e4a'}];
+grassSpots.forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2+6; ctx.save(); ctx.translate(bx,by); ctx.scale(0.9,0.9); ctx.lineJoin='round'; ctx.globalAlpha=IS_LIGHT_BOARD?0.72:0.5; ctx.fillStyle=IS_LIGHT_BOARD?'rgba(70,110,50,0.28)':'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(2,1,8.5,2.6,0,0,Math.PI*2); ctx.fill(); bladeSet.forEach(b => { ctx.save(); ctx.translate(b.x,0); ctx.rotate(b.rot); leafPath(b.w,b.h); ctx.fillStyle=IS_LIGHT_BOARD?'#7fae5c':'#0e1714'; ctx.strokeStyle=IS_LIGHT_BOARD?'#7fae5c':'#0e1714'; ctx.lineWidth=3.4; ctx.fill(); ctx.stroke(); ctx.restore(); }); bladeSet.forEach(b => { ctx.save(); ctx.translate(b.x,0); ctx.rotate(b.rot); leafPath(b.w,b.h); ctx.strokeStyle=IS_LIGHT_BOARD?'rgba(96,140,66,0.9)':'rgba(14,23,20,0.9)'; ctx.lineWidth=2.2; ctx.stroke(); const lg=ctx.createLinearGradient(-b.w/2,0,b.w/2,0); lg.addColorStop(0,b.c1); lg.addColorStop(1,b.c2); leafPath(b.w,b.h); ctx.fillStyle=lg; ctx.fill(); ctx.restore(); }); ctx.restore(); });
 } else if (skinId === 'hu') {
-[[2,5],[7,14],[14,3],[20,18],[24,7],[10,25],[18,10],[5,21]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; if (!drawImageHelper(TIGER_ASSETS.leaf,bx,by,GRID*1.6)) { ctx.fillStyle='rgba(255,140,0,0.5)'; ctx.beginPath(); ctx.arc(bx,by,8,0,Math.PI*2); ctx.fill(); } });
+[[2,5],[7,14],[14,3],[20,18],[24,7],[10,25],[18,10],[5,21]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; ctx.globalAlpha=DECO_ALPHA; if (!drawImageHelper('leaf',bx,by,GRID*1.6)) { ctx.fillStyle='rgba(214,150,72,0.55)'; ctx.beginPath(); ctx.arc(bx,by,8,0,Math.PI*2); ctx.fill(); } ctx.globalAlpha=1; });
 } else if (skinId === 'tu') {
-[[3,4],[9,12],[16,5],[22,18],[6,22],[25,9],[11,25],[19,3],[27,15],[13,16],[2,10],[29,6]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; if (!drawImageHelper(RABBIT_ASSETS.paw,bx,by,GRID*1.4)) { ctx.fillStyle='rgba(255,182,193,0.6)'; ctx.beginPath(); ctx.arc(bx,by,7,0,Math.PI*2); ctx.fill(); } });
+[[3,4],[9,12],[16,5],[22,18],[6,22],[25,9],[11,25],[19,3],[27,15],[13,16],[2,10],[29,6]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; ctx.globalAlpha=DECO_ALPHA; if (!drawImageHelper('rab_paw',bx,by,GRID*1.4)) { ctx.fillStyle='rgba(214,116,158,0.6)'; ctx.beginPath(); ctx.arc(bx,by,7,0,Math.PI*2); ctx.fill(); } ctx.globalAlpha=1; });
 } else if (skinId === 'long') {
-[[3,5],[8,15],[15,4],[22,17],[5,23],[25,8],[11,26],[19,4],[27,14],[12,18],[2,11],[28,7]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; if (!drawImageHelper(DRAGON_ASSETS.decor,bx,by,GRID*1.5)) { ctx.fillStyle='rgba(200,240,220,0.6)'; ctx.beginPath(); ctx.arc(bx-6,by,5,0,Math.PI*2); ctx.arc(bx,by-4,6,0,Math.PI*2); ctx.arc(bx+6,by,5,0,Math.PI*2); ctx.arc(bx,by+3,5,0,Math.PI*2); ctx.fill(); } });
+[[3,5],[8,15],[15,4],[22,17],[5,23],[25,8],[11,26],[19,4],[27,14],[12,18],[2,11],[28,7]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; ctx.globalAlpha=DECO_ALPHA; if (!drawImageHelper('dragon_decor',bx,by,GRID*1.5)) { ctx.fillStyle='rgba(64,180,164,0.55)'; ctx.beginPath(); ctx.arc(bx-6,by,5,0,Math.PI*2); ctx.arc(bx,by-4,6,0,Math.PI*2); ctx.arc(bx+6,by,5,0,Math.PI*2); ctx.arc(bx,by+3,5,0,Math.PI*2); ctx.fill(); } ctx.globalAlpha=1; });
 } else if (skinId === 'she') {
 [[3,4],[9,12],[16,5],[22,18],[6,22],[25,9],[11,25],[19,3],[27,15],[13,16],[2,10],[29,6]].forEach(([gx,gy], idx) => {
 const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2;
-if (idx%2===0) { if (!drawImageHelper(SNAKE_ASSETS.drop,bx,by,GRID*1.3)) { ctx.fillStyle='rgba(180,230,255,0.6)'; ctx.beginPath(); ctx.ellipse(bx,by,5,7,0,0,Math.PI*2); ctx.fill(); } }
-else { if (!drawImageHelper(SNAKE_ASSETS.leaf,bx,by,GRID*1.3)) { ctx.fillStyle='rgba(150,220,130,0.6)'; ctx.beginPath(); ctx.ellipse(bx,by,5,8,0.5,0,Math.PI*2); ctx.fill(); } }
+ctx.globalAlpha=DECO_ALPHA;
+if (idx%2===0) { if (!drawImageHelper('snake_drop',bx,by,GRID*1.3)) { ctx.fillStyle=IS_LIGHT_BOARD?'rgba(122,178,76,0.6)':'rgba(143,200,96,0.5)'; ctx.beginPath(); ctx.ellipse(bx,by,5,7,0,0,Math.PI*2); ctx.fill(); } }
+else { if (!drawImageHelper('snake_leaf',bx,by,GRID*1.3)) { ctx.fillStyle=IS_LIGHT_BOARD?'rgba(104,162,70,0.6)':'rgba(120,180,90,0.5)'; ctx.beginPath(); ctx.ellipse(bx,by,5,8,0.5,0,Math.PI*2); ctx.fill(); } }
+ctx.globalAlpha=1;
 });
 } else if (skinId === 'ma') {
-[[3,4],[9,12],[16,5],[22,18],[6,22],[25,9],[11,25],[19,3],[27,15],[13,16],[2,10],[29,6]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; if (!drawImageHelper(HORSE_ASSETS.decor,bx,by,GRID*1.4)) { ctx.fillStyle='#ffb347'; ctx.beginPath(); ctx.arc(bx,by,6,0,Math.PI*2); ctx.fill(); } });
+[[3,4],[9,12],[16,5],[22,18],[6,22],[25,9],[11,25],[19,3],[27,15],[13,16],[2,10],[29,6]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; ctx.globalAlpha=DECO_ALPHA; if (!drawImageHelper('horse_decor',bx,by,GRID*1.4)) { ctx.fillStyle=IS_LIGHT_BOARD?'#b87d3c':'#d99b57'; ctx.beginPath(); ctx.arc(bx,by,6,0,Math.PI*2); ctx.fill(); } ctx.globalAlpha=1; });
 } else if (skinId === 'yang') {
-[[3,4],[9,12],[16,5],[22,18],[6,22],[25,9],[11,25],[19,3],[27,15],[13,16],[2,10],[29,6]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; if (!drawImageHelper(SHEEP_ASSETS.decor,bx,by,GRID*1.4)) { ctx.fillStyle='#c8a8e8'; ctx.beginPath(); ctx.moveTo(bx-5,by+3); ctx.quadraticCurveTo(bx-6,by-5,bx,by-6); ctx.quadraticCurveTo(bx+6,by-5,bx+5,by+3); ctx.closePath(); ctx.fill(); } });
+[[3,4],[9,12],[16,5],[22,18],[6,22],[25,9],[11,25],[19,3],[27,15],[13,16],[2,10],[29,6]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; ctx.globalAlpha=DECO_ALPHA; if (!drawImageHelper('sheep_decor',bx,by,GRID*1.4)) { ctx.fillStyle=IS_LIGHT_BOARD?'#8a68c0':'#a98cd8'; ctx.beginPath(); ctx.moveTo(bx-5,by+3); ctx.quadraticCurveTo(bx-6,by-5,bx,by-6); ctx.quadraticCurveTo(bx+6,by-5,bx+5,by+3); ctx.closePath(); ctx.fill(); } ctx.globalAlpha=1; });
 }
 }
 
 function drawObstacle(o) {
 const bx = o.x * GRID + GRID/2, by = o.y * GRID + GRID/2;
-ctx.fillStyle = 'rgba(0,0,0,0.4)';
-ctx.beginPath(); ctx.ellipse(bx, by + GRID*0.38, GRID*0.42, GRID*0.15, 0, 0, Math.PI*2); ctx.fill();
-const stoneGrad = ctx.createRadialGradient(bx - GRID*0.2, by - GRID*0.25, 2, bx, by, GRID*0.6);
-stoneGrad.addColorStop(0, '#9a9aa6'); stoneGrad.addColorStop(0.55, '#5a5a66'); stoneGrad.addColorStop(1, '#33333d');
-ctx.fillStyle = stoneGrad;
+// ★ 美术重做：石头加「投影 + 冷调岩体 + 顶部受光 + 底部暗面 + 两道裂纹」，
+//    从前的纯灰渐变在深色棋盘上灰成一片，现在靠冷暖对比立起来
+// 地面投影
+ctx.fillStyle = 'rgba(0,0,0,0.5)';
+ctx.beginPath(); ctx.ellipse(bx, by + GRID*0.40, GRID*0.44, GRID*0.16, 0, 0, Math.PI*2); ctx.fill();
 const pts = [[-0.45,-0.15],[-0.30,-0.42],[0.05,-0.45],[0.35,-0.30],[0.45,0.05],[0.30,0.40],[-0.05,0.45],[-0.35,0.30],[-0.45,0.10]];
-ctx.beginPath();
-pts.forEach((p, i) => { if (i===0) ctx.moveTo(bx+p[0]*GRID, by+p[1]*GRID); else ctx.lineTo(bx+p[0]*GRID, by+p[1]*GRID); });
-ctx.closePath(); ctx.fill();
-ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1; ctx.stroke();
-ctx.fillStyle = 'rgba(255,255,255,0.28)';
-ctx.beginPath(); ctx.arc(bx - GRID*0.15, by - GRID*0.18, GRID*0.1, 0, Math.PI*2); ctx.fill();
+const tracePath = () => {
+  ctx.beginPath();
+  pts.forEach((p, i) => { if (i===0) ctx.moveTo(bx+p[0]*GRID, by+p[1]*GRID); else ctx.lineTo(bx+p[0]*GRID, by+p[1]*GRID); });
+  ctx.closePath();
+};
+// 岩体：偏冷的蓝灰，和新棋盘的冷底调统一
+const stoneGrad = ctx.createRadialGradient(bx - GRID*0.22, by - GRID*0.28, 2, bx, by, GRID*0.68);
+stoneGrad.addColorStop(0, '#a8b0be'); stoneGrad.addColorStop(0.42, '#6b7484'); stoneGrad.addColorStop(0.78, '#454d5c'); stoneGrad.addColorStop(1, '#272d38');
+ctx.fillStyle = stoneGrad; tracePath(); ctx.fill();
+// 描边
+ctx.strokeStyle = 'rgba(10,14,22,0.7)'; ctx.lineWidth = 1.2; tracePath(); ctx.stroke();
+// 顶部受光边：只描上半圈
+ctx.save(); tracePath(); ctx.clip();
+const rimGrad = ctx.createLinearGradient(0, by-GRID*0.45, 0, by+GRID*0.1);
+rimGrad.addColorStop(0, 'rgba(255,255,255,0.42)');
+rimGrad.addColorStop(1, 'rgba(255,255,255,0)');
+ctx.fillStyle = rimGrad; ctx.fillRect(bx-GRID*0.5, by-GRID*0.5, GRID, GRID*0.6);
+// 底部暗面
+const botGrad = ctx.createLinearGradient(0, by+GRID*0.1, 0, by+GRID*0.48);
+botGrad.addColorStop(0, 'rgba(0,0,0,0)');
+botGrad.addColorStop(1, 'rgba(0,0,0,0.38)');
+ctx.fillStyle = botGrad; ctx.fillRect(bx-GRID*0.5, by+GRID*0.1, GRID, GRID*0.4);
+ctx.restore();
+// 高光点
+ctx.fillStyle = 'rgba(255,255,255,0.34)';
+ctx.beginPath(); ctx.arc(bx - GRID*0.17, by - GRID*0.20, GRID*0.09, 0, Math.PI*2); ctx.fill();
+// 两道裂纹：让石头看起来"硬"
+ctx.strokeStyle = 'rgba(16,20,28,0.5)'; ctx.lineWidth = 0.9; ctx.lineCap='round';
+ctx.beginPath(); ctx.moveTo(bx+GRID*0.06, by-GRID*0.22); ctx.lineTo(bx-GRID*0.04, by+GRID*0.06); ctx.lineTo(bx+GRID*0.10, by+GRID*0.26); ctx.stroke();
+ctx.beginPath(); ctx.moveTo(bx-GRID*0.26, by+GRID*0.10); ctx.lineTo(bx-GRID*0.14, by+GRID*0.24); ctx.stroke();
 }
 
 function drawPortal(p) {
 const px = p.x * GRID + GRID/2, py = p.y * GRID + GRID/2;
-const rotation = performance.now()/1000 * 2;
-const pulse = 0.9 + Math.sin(performance.now()/1000 * 4) * 0.1;
-const glow = ctx.createRadialGradient(px, py, GRID*0.1, px, py, GRID*0.95);
-glow.addColorStop(0, p.color + 'ff'); glow.addColorStop(0.5, p.color + '88'); glow.addColorStop(1, p.color + '00');
-ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(px, py, GRID*0.95, 0, Math.PI*2); ctx.fill();
+const rotation = drawNowTs/1000 * 2;
+const pulse = 0.9 + Math.sin(drawNowTs/1000 * 4) * 0.1;
+// ★ 美术重做：传送门加了「漩涡底盘 + 双向旋转环 + 中心亮点 + 外圈倒计时」四层
+//    从前只有两段弧线，在深色棋盘上很单薄；现在做成一个能看见深度的"洞"
+// 外层柔光
+const glow = ctx.createRadialGradient(px, py, GRID*0.1, px, py, GRID*1.0);
+glow.addColorStop(0, p.color + 'ff'); glow.addColorStop(0.42, p.color + '77'); glow.addColorStop(1, p.color + '00');
+ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(px, py, GRID*1.0, 0, Math.PI*2); ctx.fill();
+// 漩涡底盘：越靠中心越暗，制造"往里吸"的错觉
+const hole = ctx.createRadialGradient(px, py, GRID*0.05, px, py, GRID*0.52);
+hole.addColorStop(0, 'rgba(6,10,18,0.95)');
+hole.addColorStop(0.62, p.color + '55');
+hole.addColorStop(1, p.color + '11');
+ctx.fillStyle = hole; ctx.beginPath(); ctx.arc(px, py, GRID*0.52, 0, Math.PI*2); ctx.fill();
+// 双向旋转环
 ctx.save(); ctx.translate(px, py); ctx.rotate(rotation);
-ctx.strokeStyle = p.color; ctx.lineWidth = 2.5;
+ctx.strokeStyle = p.color; ctx.lineWidth = 2.6; ctx.lineCap='round';
 ctx.beginPath(); ctx.arc(0, 0, GRID*0.42*pulse, 0, Math.PI*1.5); ctx.stroke();
 ctx.rotate(-rotation*1.7);
-ctx.beginPath(); ctx.arc(0, 0, GRID*0.28*pulse, 0, Math.PI*1.2); ctx.stroke();
+ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1.8;
+ctx.beginPath(); ctx.arc(0, 0, GRID*0.29*pulse, 0, Math.PI*1.2); ctx.stroke();
 ctx.restore();
-ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(px, py, GRID*0.1, 0, Math.PI*2); ctx.fill();
+// 中心亮点
+const core = ctx.createRadialGradient(px, py, 0, px, py, GRID*0.18);
+core.addColorStop(0, '#ffffff'); core.addColorStop(1, p.color + '00');
+ctx.fillStyle = core; ctx.beginPath(); ctx.arc(px, py, GRID*0.18, 0, Math.PI*2); ctx.fill();
+// 外圈倒计时
 const timerRatio = Math.max(0, p.timer/PORTAL_DURATION);
 ctx.beginPath(); ctx.arc(px, py, GRID*0.62, -Math.PI/2, -Math.PI/2 + Math.PI*2*timerRatio);
 ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -1300,52 +1718,106 @@ const bellFill = ctx.createLinearGradient(-5,-9,5,6); bellFill.addColorStop(0,'#
 bellPath(); ctx.fillStyle=bellFill; ctx.fill(); bellPath(); ctx.strokeStyle=BELL_LINE; ctx.lineWidth=1.5; ctx.stroke();
 ctx.beginPath(); ctx.arc(0,5.6,2.5,0,Math.PI*2); ctx.fillStyle='#ffd75e'; ctx.fill(); ctx.strokeStyle=BELL_LINE; ctx.lineWidth=1.3; ctx.stroke();
 ctx.restore();
-} else if (boardSkinId === 'hu') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(TIGER_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ff9b7a'; ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (boardSkinId === 'tu') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(RABBIT_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ff8c00'; ctx.beginPath(); ctx.moveTo(0,-10); ctx.quadraticCurveTo(8,-2,0,12); ctx.quadraticCurveTo(-8,-2,0,-10); ctx.fill(); } ctx.restore(); }
-else if (boardSkinId === 'long') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(DRAGON_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (boardSkinId === 'she') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(SNAKE_ASSETS.food,0,0,GRID*1.9)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.ellipse(0,2,9,10,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (boardSkinId === 'ma') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(HORSE_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (boardSkinId === 'yang') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper(SHEEP_ASSETS.food,0,0,GRID*1.8)) { ctx.fillStyle='#ffb6c1'; ctx.fillRect(-8,-8,16,16); ctx.fillStyle='#ffe4a0'; ctx.fillRect(-8,-5,16,4); ctx.fillStyle='#b8e6b8'; ctx.fillRect(-8,-1,16,4); } ctx.restore(); }
+} else if (boardSkinId === 'hu') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper('food',0,0,GRID*1.8)) { ctx.fillStyle='#ff9b7a'; ctx.beginPath(); ctx.arc(0,0,8,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'tu') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper('rab_food',0,0,GRID*1.8)) { ctx.fillStyle='#ff8c00'; ctx.beginPath(); ctx.moveTo(0,-10); ctx.quadraticCurveTo(8,-2,0,12); ctx.quadraticCurveTo(-8,-2,0,-10); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'long') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper('dragon_food',0,0,GRID*1.8)) { ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'she') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper('snake_food',0,0,GRID*1.9)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.ellipse(0,2,9,10,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'ma') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper('horse_food',0,0,GRID*1.8)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (boardSkinId === 'yang') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper('sheep_food',0,0,GRID*1.8)) { ctx.fillStyle='#ffb6c1'; ctx.fillRect(-8,-8,16,16); ctx.fillStyle='#ffe4a0'; ctx.fillRect(-8,-5,16,4); ctx.fillStyle='#b8e6b8'; ctx.fillRect(-8,-1,16,4); } ctx.restore(); }
 else {
-const foodGrad = ctx.createRadialGradient(fx-4,fy-4,1,fx,fy,GRID/2-1);
+// ★ 美术重做：默认食物从「一个圆 + 一个小白点」升级为「带立体感的果实」
+//    ① 主体径向渐变，光源在左上
+//    ② 深色描边，在深色棋盘上有轮廓
+//    ③ 左上高光斑 + 底部反光，做出球形体积
+//    ④ 一颗小蒂，暗示这是"长出来的"食物而不是色块
+const fr = (GRID/2-2.5)*pulse;
+const foodGrad = ctx.createRadialGradient(fx-fr*0.36,fy-fr*0.36,fr*0.08,fx,fy,fr);
 foodGrad.addColorStop(0, fc[0]); foodGrad.addColorStop(0.55, fc[1]); foodGrad.addColorStop(1, fc[2]);
-ctx.fillStyle = foodGrad; ctx.beginPath(); ctx.arc(fx,fy,(GRID/2-2.5)*pulse,0,Math.PI*2); ctx.fill();
+ctx.fillStyle = foodGrad; ctx.beginPath(); ctx.arc(fx,fy,fr,0,Math.PI*2); ctx.fill();
+ctx.strokeStyle = 'rgba(60,8,12,0.55)'; ctx.lineWidth = 1;
+ctx.beginPath(); ctx.arc(fx,fy,fr,0,Math.PI*2); ctx.stroke();
+// 左上高光
+ctx.fillStyle = 'rgba(255,255,255,0.78)';
+ctx.beginPath(); ctx.ellipse(fx-fr*0.36, fy-fr*0.40, fr*0.30, fr*0.22, -0.6, 0, Math.PI*2); ctx.fill();
+// 底部反光（环境光）
+ctx.fillStyle = 'rgba(255,220,220,0.22)';
+ctx.beginPath(); ctx.ellipse(fx+fr*0.14, fy+fr*0.52, fr*0.36, fr*0.18, 0.2, 0, Math.PI*2); ctx.fill();
+// 小蒂
+ctx.strokeStyle = 'rgba(120,200,140,0.9)'; ctx.lineWidth = 1.6; ctx.lineCap='round';
+ctx.beginPath(); ctx.moveTo(fx, fy-fr*0.92); ctx.quadraticCurveTo(fx+fr*0.28, fy-fr*1.22, fx+fr*0.52, fy-fr*1.05); ctx.stroke();
 }
 }
 
 function drawSpecialFood(sf) {
 const sfx = sf.x*GRID + GRID/2, sfy = sf.y*GRID + GRID/2;
 const sPulse = 0.9 + Math.sin(foodPulse*1.6)*0.15;
-const sGlow = ctx.createRadialGradient(sfx,sfy,2,sfx,sfy,GRID*1.6);
-sGlow.addColorStop(0,'rgba(255,255,255,0.6)'); sGlow.addColorStop(1,'rgba(255,255,255,0)');
-ctx.fillStyle = sGlow; ctx.beginPath(); ctx.arc(sfx,sfy,GRID*1.6,0,Math.PI*2); ctx.fill();
+// ★ 美术重做：特殊食物加「双层光晕 + 地面投影 + 外圈倒计时 + 主体」，
+//    让它在棋盘上第一眼就被看到，因为它是限时的（8 秒消失）
+// 外层大光晕
+const sGlow = ctx.createRadialGradient(sfx,sfy,2,sfx,sfy,GRID*1.75);
+sGlow.addColorStop(0,'rgba(255,255,255,0.55)');
+sGlow.addColorStop(0.4,'rgba(255,215,90,0.22)');
+sGlow.addColorStop(1,'rgba(255,215,90,0)');
+ctx.fillStyle = sGlow; ctx.beginPath(); ctx.arc(sfx,sfy,GRID*1.75,0,Math.PI*2); ctx.fill();
+// 地面投影
+ctx.fillStyle = 'rgba(0,0,0,0.4)';
+ctx.beginPath(); ctx.ellipse(sfx, sfy+GRID*0.42, GRID*0.36, GRID*0.12, 0, 0, Math.PI*2); ctx.fill();
+// 外圈倒计时：颜色随剩余时间从绿转黄再转红
 const timerRatio = Math.max(0, specialFoodTimer / SPECIAL_FOOD_DURATION);
 let rR, rG, rB;
 if (timerRatio > 0.5) { const t = (timerRatio-0.5)/0.5; rR = Math.floor(255*(1-t)); rG = 255; rB = 0; }
 else { const t = timerRatio/0.5; rR = 255; rG = Math.floor(255*t); rB = 0; }
+// 倒计时底环（暗），再叠进度弧（亮），即使剩余极少也能看清还剩一点
+ctx.beginPath(); ctx.arc(sfx, sfy, GRID*0.85, 0, Math.PI*2);
+ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 3.5; ctx.stroke();
 ctx.beginPath(); ctx.arc(sfx, sfy, GRID*0.85, -Math.PI/2, -Math.PI/2 + Math.PI*2*timerRatio);
-ctx.strokeStyle = 'rgba('+rR+','+rG+','+rB+',0.95)'; ctx.lineWidth = 3.5; ctx.stroke();
+ctx.strokeStyle = 'rgba('+rR+','+rG+','+rB+',0.95)'; ctx.lineWidth = 3.5; ctx.lineCap='round'; ctx.stroke();
 ctx.save(); ctx.translate(sfx,sfy); ctx.scale(sPulse,sPulse);
 if (sf.type === 'gold') {
+// 金元宝：主体 + 底部暗面 + 顶面高光 + 描边，做出金属感
+ctx.fillStyle='#c99000'; ctx.beginPath(); ctx.ellipse(0,1.5,10,7,0,0,Math.PI*2); ctx.fill();
 ctx.fillStyle='#ffd700'; ctx.beginPath(); ctx.ellipse(0,0,10,7,0,0,Math.PI*2); ctx.fill();
-ctx.fillStyle='#ffaa00'; ctx.beginPath(); ctx.ellipse(0,2,8,4,0,0,Math.PI*2); ctx.fill();
-ctx.fillStyle='#ffef99'; ctx.beginPath(); ctx.ellipse(-2,-2,4,2.5,0,0,Math.PI*2); ctx.fill();
+ctx.strokeStyle='rgba(120,80,0,0.7)'; ctx.lineWidth=1; ctx.beginPath(); ctx.ellipse(0,0,10,7,0,0,Math.PI*2); ctx.stroke();
+ctx.fillStyle='#ffaa00'; ctx.beginPath(); ctx.ellipse(0,2.5,8,4,0,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='#fff6c0'; ctx.beginPath(); ctx.ellipse(-2.5,-2.5,4,2.4,-0.3,0,Math.PI*2); ctx.fill();
 } else if (sf.type === 'speed') {
-ctx.fillStyle='#ffe14d'; ctx.strokeStyle='#b37b00'; ctx.lineWidth=1;
+// 加速：闪电加双层描边 + 高光，像在发光
+ctx.fillStyle='#ffe14d'; ctx.strokeStyle='#8a5d00'; ctx.lineWidth=1.2;
 ctx.beginPath(); ctx.moveTo(2,-10); ctx.lineTo(-5,1); ctx.lineTo(-1,1); ctx.lineTo(-3,10); ctx.lineTo(5,-1); ctx.lineTo(1,-1); ctx.closePath(); ctx.fill(); ctx.stroke();
+ctx.fillStyle='rgba(255,255,255,0.85)';
+ctx.beginPath(); ctx.moveTo(1,-7); ctx.lineTo(-3.4,0); ctx.lineTo(-0.6,0); ctx.lineTo(-1.8,6); ctx.lineTo(3.4,-0.4); ctx.lineTo(0.6,-0.4); ctx.closePath(); ctx.fill();
 } else if (sf.type === 'shield') {
-ctx.fillStyle='#5bc0ff'; ctx.strokeStyle='#ffffff'; ctx.lineWidth=1.5;
-ctx.beginPath(); ctx.moveTo(0,-10); ctx.lineTo(9,-6); ctx.lineTo(9,2); ctx.quadraticCurveTo(9,9,0,11); ctx.quadraticCurveTo(-9,9,-9,2); ctx.lineTo(-9,-6); ctx.closePath(); ctx.fill(); ctx.stroke();
-ctx.strokeStyle='#ffffff'; ctx.lineWidth=2;
-ctx.beginPath(); ctx.moveTo(0,-6); ctx.lineTo(0,6); ctx.stroke();
-ctx.beginPath(); ctx.moveTo(-5,0); ctx.lineTo(5,0); ctx.stroke();
+// 护盾：金属盾牌 + 内嵌十字 + 顶部受光
+ctx.fillStyle='#3a9fd8';
+ctx.beginPath(); ctx.moveTo(0,-10); ctx.lineTo(9,-6); ctx.lineTo(9,2); ctx.quadraticCurveTo(9,9,0,11); ctx.quadraticCurveTo(-9,9,-9,2); ctx.lineTo(-9,-6); ctx.closePath(); ctx.fill();
+ctx.fillStyle='#5bc0ff';
+ctx.beginPath(); ctx.moveTo(0,-9); ctx.lineTo(8,-5.4); ctx.lineTo(8,1.8); ctx.quadraticCurveTo(8,8,0,10); ctx.quadraticCurveTo(-8,8,-8,1.8); ctx.lineTo(-8,-5.4); ctx.closePath(); ctx.fill();
+ctx.strokeStyle='rgba(255,255,255,0.85)'; ctx.lineWidth=1.5;
+ctx.beginPath(); ctx.moveTo(0,-6); ctx.lineTo(0,6); ctx.moveTo(-5,0); ctx.lineTo(5,0); ctx.stroke();
+ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1;
+ctx.beginPath(); ctx.moveTo(0,-10); ctx.lineTo(9,-6); ctx.lineTo(9,2); ctx.quadraticCurveTo(9,9,0,11); ctx.quadraticCurveTo(-9,9,-9,2); ctx.lineTo(-9,-6); ctx.closePath(); ctx.stroke();
 } else if (sf.type === 'shrink') {
-ctx.fillStyle='#9b5de5'; ctx.strokeStyle='#4a1d80'; ctx.lineWidth=1;
+// 缩小药水：瓶身 + 瓶口 + 内液 + 高光
+ctx.fillStyle='#7b3fb8'; ctx.strokeStyle='rgba(30,8,55,0.8)'; ctx.lineWidth=1;
 ctx.beginPath(); ctx.moveTo(-4,-10); ctx.lineTo(4,-10); ctx.lineTo(4,-5); ctx.lineTo(6,-2); ctx.lineTo(6,9); ctx.quadraticCurveTo(6,11,4,11); ctx.lineTo(-4,11); ctx.quadraticCurveTo(-6,11,-6,9); ctx.lineTo(-6,-2); ctx.lineTo(-4,-5); ctx.closePath(); ctx.fill(); ctx.stroke();
-ctx.fillStyle='#d0a0ff';
+ctx.fillStyle='#c07dff';
 ctx.beginPath(); ctx.moveTo(-5,-1); ctx.lineTo(5,-1); ctx.lineTo(5,9); ctx.quadraticCurveTo(5,10,4,10); ctx.lineTo(-4,10); ctx.quadraticCurveTo(-5,10,-5,9); ctx.closePath(); ctx.fill();
+// 玻璃高光
+ctx.fillStyle='rgba(255,255,255,0.55)';
+ctx.beginPath(); ctx.ellipse(-3.2,3,1.3,4,0.16,0,Math.PI*2); ctx.fill();
 }
 ctx.restore();
+}
+
+// 牛皮肤身体上的牛奶高光渐变：坐标是局部的（在 translate/rotate 之后），
+// 每个身体段都一样，原来每段都新建一次，现在只建一次反复用。
+let __niuMilkGrad = null;
+function getNiuMilkGradient() {
+  if (__niuMilkGrad) return __niuMilkGrad;
+  __niuMilkGrad = ctx.createLinearGradient(0, 0, 0, 11);
+  __niuMilkGrad.addColorStop(0, '#fffdf6');
+  __niuMilkGrad.addColorStop(1, '#ffeed2');
+  return __niuMilkGrad;
 }
 
 function drawPlayer(p, idx) {
@@ -1384,12 +1856,12 @@ ctx.stroke();
 ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
 });
 
-const isInvincibleNow = performance.now() < (p.invincibleUntil || 0);
-const isGhostNow = p.ghostMode && performance.now() < p.ghostUntil;
+const isInvincibleNow = drawNowTs < (p.invincibleUntil || 0);
+const isGhostNow = p.ghostMode && drawNowTs < p.ghostUntil;
 if (isGhostNow) {
-  ctx.globalAlpha = 0.4 + Math.sin(performance.now()/80)*0.2;
+  ctx.globalAlpha = 0.4 + Math.sin(drawNowTs/80)*0.2;
 } else if (isInvincibleNow) {
-  ctx.globalAlpha = 0.35 + Math.sin(performance.now()/60)*0.25;
+  ctx.globalAlpha = 0.35 + Math.sin(drawNowTs/60)*0.25;
 }
 
 p.body.forEach((seg, i) => {
@@ -1419,13 +1891,49 @@ facePath(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.8; ctx.stroke();
 [[-1],[1]].forEach(([dir]) => { ctx.beginPath(); ctx.arc(cx+dir*4.3,cy-0.6,3.6,0,Math.PI*2); ctx.fillStyle='#4a2c1a'; ctx.fill(); ctx.beginPath(); ctx.arc(cx+dir*3.2,cy-1.9,1.5,0,Math.PI*2); ctx.fillStyle='#ffffff'; ctx.fill(); });
 ctx.beginPath(); ctx.ellipse(cx,cy+4.2,2.5,1.8,0,0,Math.PI*2); ctx.fillStyle='#ff9eb5'; ctx.fill();
 ctx.beginPath(); ctx.arc(cx,cy+5.6,2.9,0.22,Math.PI-0.22); ctx.strokeStyle=STROKE; ctx.lineWidth=1.4; ctx.lineCap='round'; ctx.stroke();
-} else if (pSkinId === 'hu') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(TIGER_ASSETS.head,0,0,GRID*1.9)) { ctx.fillStyle='#f5b06c'; ctx.beginPath(); ctx.arc(0,0,13,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (pSkinId === 'tu') { if (!drawImageHelper(RABBIT_ASSETS.head,cx,cy,GRID*1.9)) { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (pSkinId === 'long') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(DRAGON_ASSETS.head,0,0,GRID*2.0)) { ctx.fillStyle='#e0f5ec'; ctx.beginPath(); ctx.arc(0,0,13,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (pSkinId === 'she') { if (!drawImageHelper(SNAKE_ASSETS.head,cx,cy,GRID*1.9)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (pSkinId === 'ma') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(HORSE_ASSETS.head,0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (pSkinId === 'yang') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper(SHEEP_ASSETS.head,0,0,GRID*2.0)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else { const headGlow = ctx.createRadialGradient(cx,cy,2,cx,cy,GRID*1.1); const glowCol = p.id === 'p2' ? 'rgba(241,91,181,' : 'rgba(0,245,212,'; headGlow.addColorStop(0, glowCol + '0.4)'); headGlow.addColorStop(1, glowCol + '0)'); ctx.fillStyle=headGlow; ctx.fillRect(x-5,y-5,GRID+10,GRID+10); const headGrad = ctx.createLinearGradient(x,y,x+GRID,y+GRID); headGrad.addColorStop(0, headColors[0]); headGrad.addColorStop(0.5, headColors[1]); headGrad.addColorStop(1, headColors[2]); ctx.fillStyle=headGrad; roundRect(ctx,x+1.5,y+1.5,GRID-3,GRID-3,7); ctx.fill(); }
+} else if (pSkinId === 'hu') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper('head',0,0,GRID*1.9)) { ctx.fillStyle='#f5b06c'; ctx.beginPath(); ctx.arc(0,0,13,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'tu') { if (!drawImageHelper('rab_head',cx,cy,GRID*1.9)) { ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'long') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper('dragon_head',0,0,GRID*2.0)) { ctx.fillStyle='#e0f5ec'; ctx.beginPath(); ctx.arc(0,0,13,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'she') { if (!drawImageHelper('snake_head',cx,cy,GRID*1.9)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'ma') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper('horse_head',0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'yang') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper('sheep_head',0,0,GRID*2.0)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else { const headGrad = ctx.createLinearGradient(x,y,x+GRID,y+GRID); headGrad.addColorStop(0, headColors[0]); headGrad.addColorStop(0.5, headColors[1]); headGrad.addColorStop(1, headColors[2]); 
+// ★ 美术重做：蛇头把「光晕 + 主色块 + 描边 + 高光 + 眼睛」拆开画，层次分明
+// 外层柔光：用 P1/P2 主题色，让蛇头在深色棋盘上自带光源
+const glowCol = p.id === 'p2' ? 'rgba(241,91,181,' : 'rgba(0,245,212,';
+const headGlow = ctx.createRadialGradient(cx,cy,2,cx,cy,GRID*1.35);
+headGlow.addColorStop(0, glowCol + '0.30)');
+headGlow.addColorStop(1, glowCol + '0)');
+ctx.fillStyle=headGlow; ctx.fillRect(x-8,y-8,GRID+16,GRID+16);
+// 主色块
+ctx.fillStyle=headGrad; roundRect(ctx,x+1.5,y+1.5,GRID-3,GRID-3,7); ctx.fill();
+// 深色描边
+ctx.strokeStyle='rgba(4,10,16,0.55)'; ctx.lineWidth=1.2;
+roundRect(ctx,x+2.1,y+2.1,GRID-4.2,GRID-4.2,6.5); ctx.stroke();
+// 顶部高光弧：只盖住上半部分，做出「圆润的头顶」
+ctx.save();
+roundRect(ctx,x+1.5,y+1.5,GRID-3,GRID-3,7); ctx.clip();
+const hhGrad = ctx.createLinearGradient(0, y+1.5, 0, y+GRID*0.62);
+hhGrad.addColorStop(0,'rgba(255,255,255,0.42)');
+hhGrad.addColorStop(1,'rgba(255,255,255,0)');
+ctx.fillStyle = hhGrad;
+ctx.fillRect(x+1.5, y+1.5, GRID-3, GRID*0.6);
+ctx.restore();
+// 眼睛：白眼球 + 深色瞳，朝向随移动方向，有眼神才像活物
+const eyeOff = GRID*0.17;
+const perpX = direction.y !== 0 ? 1 : 0;
+const perpY = direction.x !== 0 ? 1 : 0;
+const lookX = (direction.x || 0) * GRID*0.10;
+const lookY = (direction.y || 0) * GRID*0.10;
+const e1x = cx + perpX*eyeOff + lookX, e1y = cy + perpY*eyeOff + lookY;
+const e2x = cx - perpX*eyeOff + lookX, e2y = cy - perpY*eyeOff + lookY;
+ctx.fillStyle='rgba(255,255,255,0.95)';
+ctx.beginPath(); ctx.arc(e1x,e1y,GRID*0.155,0,Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.arc(e2x,e2y,GRID*0.155,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='#0a1018';
+ctx.beginPath(); ctx.arc(e1x+lookX*0.5,e1y+lookY*0.5,GRID*0.082,0,Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.arc(e2x+lookX*0.5,e2y+lookY*0.5,GRID*0.082,0,Math.PI*2); ctx.fill();
+}
 } else {
 if (pSkinId === 'shu') {
 const scx=x+GRID/2, scy=y+GRID/2;
@@ -1445,22 +1953,49 @@ const capPath = () => { ctx.beginPath(); ctx.moveTo(-5.4,-6.4); ctx.lineTo(-5.4,
 const nipplePath = () => { ctx.beginPath(); ctx.moveTo(-2.5,-6.2); ctx.quadraticCurveTo(-2.3,-10.4,0,-11); ctx.quadraticCurveTo(2.3,-10.4,2.5,-6.2); ctx.closePath(); };
 ctx.fillStyle='#fffdf5'; ctx.strokeStyle='#fffdf5'; ctx.lineWidth=3.2; bodyPath(); ctx.fill(); ctx.stroke(); capPath(); ctx.fill(); ctx.stroke(); nipplePath(); ctx.fill(); ctx.stroke();
 bodyPath(); ctx.fillStyle='#ffffff'; ctx.fill();
-ctx.save(); bodyPath(); ctx.clip(); const milkG=ctx.createLinearGradient(0,0,0,11); milkG.addColorStop(0,'#fffdf6'); milkG.addColorStop(1,'#ffeed2'); ctx.fillStyle=milkG; ctx.fillRect(-7,0.5,14,11); ctx.restore();
+ctx.save(); bodyPath(); ctx.clip(); const milkG=getNiuMilkGradient(); ctx.fillStyle=milkG; ctx.fillRect(-7,0.5,14,11); ctx.restore();
 bodyPath(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.2; ctx.stroke();
 const capG=ctx.createLinearGradient(0,-7,0,-2); capG.addColorStop(0,'#fbe49e'); capG.addColorStop(1,'#efbb46'); capPath(); ctx.fillStyle=capG; ctx.fill(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.2; ctx.stroke();
 nipplePath(); ctx.fillStyle='#ffe0b0'; ctx.fill(); ctx.strokeStyle=STROKE; ctx.lineWidth=1.15; ctx.stroke();
 ctx.restore();
-} else if (pSkinId === 'hu') { if (!drawImageHelper(TIGER_ASSETS.body,cx,cy,GRID*1.8)) { ctx.fillStyle='#f5b06c'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (pSkinId === 'tu') { if (!drawImageHelper(RABBIT_ASSETS.body,cx,cy,GRID*1.9)) { ctx.fillStyle='#ffe4e8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
-else if (pSkinId === 'long') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper(DRAGON_ASSETS.tail,0,0,GRID*1.9)) { ctx.fillStyle='#a8e6cf'; ctx.beginPath(); ctx.ellipse(0,0,12,9,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (pSkinId === 'she') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h); if (Math.abs(a2h)>Math.PI/2) ctx.scale(1,-1); if (!drawImageHelper(SNAKE_ASSETS.tail,0,0,GRID*1.2)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (pSkinId === 'ma') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper(HORSE_ASSETS.tail,0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
-else if (pSkinId === 'yang') { if (!drawImageHelper(SHEEP_ASSETS.tail,cx,cy,GRID*1.9)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+} else if (pSkinId === 'hu') { if (!drawImageHelper('body',cx,cy,GRID*1.8)) { ctx.fillStyle='#f5b06c'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'tu') { if (!drawImageHelper('rab_body',cx,cy,GRID*1.9)) { ctx.fillStyle='#ffe4e8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'long') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper('dragon_tail',0,0,GRID*1.9)) { ctx.fillStyle='#a8e6cf'; ctx.beginPath(); ctx.ellipse(0,0,12,9,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'she') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h); if (Math.abs(a2h)>Math.PI/2) ctx.scale(1,-1); if (!drawImageHelper('snake_tail',0,0,GRID*1.2)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'ma') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper('horse_tail',0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'yang') { if (!drawImageHelper('sheep_tail',cx,cy,GRID*1.9)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
 else {
 const hue = p.bodyHue;
 const t = i/Math.max(p.body.length-1,1);
-ctx.fillStyle = 'rgb('+Math.floor(hue.r+t*40)+','+Math.floor(hue.g-t*60)+','+Math.floor(hue.b-t*40)+')';
-const inset = 2.5+t*1.8; roundRect(ctx, x+inset, y+inset, GRID-inset*2, GRID-inset*2, 5.5); ctx.fill();
+const inset = 2.5+t*1.8;
+const bx0 = x+inset, by0 = y+inset, bw = GRID-inset*2, bh = GRID-inset*2;
+// ★ 美术重做：默认皮肤的身体段从「一个纯色圆角块」升级成三段式：
+//    ① 圆角块 + 深色描边（在深色棋盘上有清晰轮廓，不再糊）
+//    ② 上缘一层白色高光条（模拟顶光）
+//    ③ 下缘叠加更深的同色（模拟自身投影）
+const baseR = Math.floor(hue.r+t*40), baseG = Math.floor(hue.g-t*60), baseB = Math.floor(hue.b-t*40);
+// 主色块
+ctx.fillStyle = 'rgb('+baseR+','+baseG+','+baseB+')';
+roundRect(ctx, bx0, by0, bw, bh, 5.5); ctx.fill();
+// 深色描边：用主色压暗 55%，比纯黑描边更和谐
+ctx.strokeStyle = 'rgba('+Math.floor(baseR*0.35)+','+Math.floor(baseG*0.35)+','+Math.floor(baseB*0.35)+',0.85)';
+ctx.lineWidth = 1.1;
+roundRect(ctx, bx0+0.55, by0+0.55, bw-1.1, bh-1.1, 5.2); ctx.stroke();
+// 上缘高光条：顶端 35% 高度，白色渐隐
+ctx.save();
+roundRect(ctx, bx0, by0, bw, bh, 5.5); ctx.clip();
+const hlGrad = ctx.createLinearGradient(0, by0, 0, by0+bh*0.6);
+hlGrad.addColorStop(0, 'rgba(255,255,255,0.34)');
+hlGrad.addColorStop(1, 'rgba(255,255,255,0)');
+ctx.fillStyle = hlGrad;
+ctx.fillRect(bx0, by0, bw, bh*0.6);
+// 下缘自阴影
+const shGrad = ctx.createLinearGradient(0, by0+bh*0.55, 0, by0+bh);
+shGrad.addColorStop(0, 'rgba(0,0,0,0)');
+shGrad.addColorStop(1, 'rgba(0,0,0,0.28)');
+ctx.fillStyle = shGrad;
+ctx.fillRect(bx0, by0+bh*0.55, bw, bh*0.45);
+ctx.restore();
 }
 }
 });
@@ -1485,39 +2020,77 @@ function drawShield(p) {
 if (!p || !p.body || !p.body[0]) return;
 const hx = p.body[0].x * GRID + GRID/2;
 const hy = p.body[0].y * GRID + GRID/2;
+// ★ 美术重做：护盾从「两个同心圆」升级为「能量罩」——
+//    双环反向自转 + 六边形格纹 + 呼吸明暗，看起来像一层真的能量膜
 const shieldPulse = 0.85 + Math.sin(foodPulse * 2.5) * 0.15;
 const shieldRadius = GRID * 1.1 * shieldPulse;
+const spin = drawNowTs / 900;
 ctx.save();
-ctx.globalAlpha = 0.75;
-const shGlow = ctx.createRadialGradient(hx, hy, GRID*0.3, hx, hy, shieldRadius*1.7);
-shGlow.addColorStop(0, 'rgba(0,255,200,0.55)'); shGlow.addColorStop(0.6, 'rgba(0,200,255,0.25)'); shGlow.addColorStop(1, 'rgba(0,200,255,0)');
-ctx.fillStyle = shGlow; ctx.beginPath(); ctx.arc(hx, hy, shieldRadius*1.7, 0, Math.PI*2); ctx.fill();
-ctx.strokeStyle = 'rgba(100,255,220,0.95)'; ctx.lineWidth = 2.5;
-ctx.beginPath(); ctx.arc(hx, hy, shieldRadius, 0, Math.PI*2); ctx.stroke();
-ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.3;
-ctx.beginPath(); ctx.arc(hx, hy, shieldRadius*0.78, 0, Math.PI*2); ctx.stroke();
+ctx.globalAlpha = 0.8;
+// 外层光晕
+const shGlow = ctx.createRadialGradient(hx, hy, GRID*0.3, hx, hy, shieldRadius*1.8);
+shGlow.addColorStop(0, 'rgba(0,255,200,0.48)');
+shGlow.addColorStop(0.55, 'rgba(0,200,255,0.20)');
+shGlow.addColorStop(1, 'rgba(0,200,255,0)');
+ctx.fillStyle = shGlow; ctx.beginPath(); ctx.arc(hx, hy, shieldRadius*1.8, 0, Math.PI*2); ctx.fill();
+// 双环反向自转：外环亮青、内环浅白
+ctx.save(); ctx.translate(hx, hy);
+ctx.rotate(spin);
+ctx.strokeStyle = 'rgba(100,255,220,0.95)'; ctx.lineWidth = 2.5; ctx.lineCap='round';
+ctx.beginPath(); ctx.arc(0, 0, shieldRadius, 0, Math.PI*1.6); ctx.stroke();
+ctx.rotate(-spin*2.1);
+ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1.4;
+ctx.beginPath(); ctx.arc(0, 0, shieldRadius*0.80, 0, Math.PI*1.25); ctx.stroke();
+ctx.restore();
+// 六边形能量格纹：取 6 个顶点画一个正六边形，弱描边
+ctx.strokeStyle = 'rgba(140,255,235,0.34)'; ctx.lineWidth = 1;
+ctx.beginPath();
+for (let k = 0; k <= 6; k++) {
+  const a = spin*0.6 + k * Math.PI / 3;
+  const px2 = hx + Math.cos(a) * shieldRadius * 0.62;
+  const py2 = hy + Math.sin(a) * shieldRadius * 0.62;
+  if (k === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2);
+}
+ctx.stroke();
 ctx.restore();
 }
 
 function drawCat() {
 if (!cat) return;
 const catCX = cat.x*GRID+GRID/2, catCY = cat.y*GRID+GRID/2;
-ctx.save(); ctx.globalAlpha = 0.35;
-const catGlow = ctx.createRadialGradient(catCX,catCY,4,catCX,catCY,GRID*1.8);
-catGlow.addColorStop(0, cat.stunLeft > 0 ? 'rgba(160,108,213,0.9)' : 'rgba(255,80,80,0.7)');
-catGlow.addColorStop(1, 'rgba(255,80,80,0)');
-ctx.fillStyle = catGlow; ctx.beginPath(); ctx.arc(catCX,catCY,GRID*1.8,0,Math.PI*2); ctx.fill();
+const stuned = cat.stunLeft > 0;
+// ★ 美术重做：野猫的威胁感来自「范围光 + 地面暗影 + 残留爪痕 + 主体」四层。
+//    旧版只有一层平涂光晕，看不出这是"猎手"；现在用红色锥形余晖 + 轨迹拖尾强化压迫感。
+const isPursuit = !stuned;   // 追猎状态才给红色威慑光，被眩晕时转为紫色
+ctx.save();
+const catGlow = ctx.createRadialGradient(catCX,catCY,GRID*0.2,catCX,catCY,GRID*2.0);
+if (stuned) {
+  catGlow.addColorStop(0, 'rgba(160,108,213,0.55)');
+  catGlow.addColorStop(0.55, 'rgba(160,108,213,0.18)');
+  catGlow.addColorStop(1, 'rgba(160,108,213,0)');
+} else {
+  catGlow.addColorStop(0, 'rgba(255,70,70,0.50)');
+  catGlow.addColorStop(0.45, 'rgba(255,60,60,0.16)');
+  catGlow.addColorStop(1, 'rgba(255,60,60,0)');
+}
+ctx.fillStyle = catGlow; ctx.beginPath(); ctx.arc(catCX,catCY,GRID*2.0,0,Math.PI*2); ctx.fill();
+// 地面暗影：让猫看起来贴地而非悬空
+ctx.fillStyle = 'rgba(0,0,0,0.42)';
+ctx.beginPath(); ctx.ellipse(catCX, catCY+GRID*0.40, GRID*0.48, GRID*0.16, 0, 0, Math.PI*2); ctx.fill();
 ctx.restore();
+// 轨迹拖尾：从尾到头逐渐加深，形成"冲刺残影"
 catTrail.forEach((ct, ci) => {
 if (!ct) return;
-const ctAlpha = (ci+1)/catTrail.length*0.2;
-ctx.globalAlpha = ctAlpha; ctx.fillStyle = 'rgba(255,60,60,0.5)';
-ctx.beginPath(); ctx.arc(ct.x*GRID+GRID/2, ct.y*GRID+GRID/2, GRID*0.4, 0, Math.PI*2); ctx.fill();
+const t = (ci+1)/catTrail.length;
+ctx.globalAlpha = t*0.30;
+ctx.fillStyle = stuned ? 'rgba(180,130,235,0.8)' : 'rgba(255,70,70,0.85)';
+ctx.beginPath(); ctx.arc(ct.x*GRID+GRID/2, ct.y*GRID+GRID/2, GRID*(0.16+0.26*t), 0, Math.PI*2); ctx.fill();
 });
 ctx.globalAlpha = 1;
 ctx.save(); ctx.translate(catCX, catCY);
-if (cat.stunLeft > 0) {
-  const rot = performance.now() / 200;
+if (stuned) {
+  // 眩晕：三颗紫色星点绕头顶公转，外加一圈抖动的弧
+  const rot = drawNowTs / 200;
   ctx.strokeStyle = 'rgba(200,140,255,0.9)';
   ctx.lineWidth = 2;
   for (let k = 0; k < 3; k++) {
@@ -1529,12 +2102,26 @@ if (cat.stunLeft > 0) {
     ctx.stroke();
   }
 }
+// 朝向翻转（保持原逻辑）
 if (cat.dir.x === 1) ctx.scale(-1,1);
 else if (cat.dir.x === -1) {}
 else if (cat.dir.y === -1) ctx.rotate(Math.PI/2);
 else if (cat.dir.y === 1) ctx.rotate(-Math.PI/2);
-if (!drawImageHelper(CAT_ASSET,0,0,GRID*1.9)) {
-ctx.fillStyle='#ff5555'; ctx.beginPath(); ctx.arc(0,0,GRID*0.45,0,Math.PI*2); ctx.fill();
+if (!drawImageHelper('cat_head',0,0,GRID*1.9)) {
+// 图集未就绪时的矢量兜底：也画成一只有耳朵、有眼睛的猫头，而不是一个红圆
+ctx.fillStyle = stuned ? '#a06cd5' : '#ff4d4d';
+ctx.beginPath(); ctx.arc(0,0,GRID*0.45,0,Math.PI*2); ctx.fill();
+ctx.strokeStyle='rgba(0,0,0,0.5)'; ctx.lineWidth=1.2; ctx.stroke();
+// 耳朵
+ctx.beginPath(); ctx.moveTo(-GRID*0.34,-GRID*0.28); ctx.lineTo(-GRID*0.46,-GRID*0.60); ctx.lineTo(-GRID*0.10,-GRID*0.42); ctx.closePath(); ctx.fill();
+ctx.beginPath(); ctx.moveTo(GRID*0.34,-GRID*0.28); ctx.lineTo(GRID*0.46,-GRID*0.60); ctx.lineTo(GRID*0.10,-GRID*0.42); ctx.closePath(); ctx.fill();
+// 眼睛
+ctx.fillStyle='#ffe94d';
+ctx.beginPath(); ctx.ellipse(-GRID*0.16,-GRID*0.05,GRID*0.09,GRID*0.11,0,0,Math.PI*2); ctx.fill();
+ctx.beginPath(); ctx.ellipse(GRID*0.16,-GRID*0.05,GRID*0.09,GRID*0.11,0,0,Math.PI*2); ctx.fill();
+ctx.fillStyle='#10161f';
+ctx.fillRect(-GRID*0.175,-GRID*0.16,GRID*0.03,GRID*0.22);
+ctx.fillRect(GRID*0.145,-GRID*0.16,GRID*0.03,GRID*0.22);
 }
 ctx.restore();
 }
@@ -1568,6 +2155,11 @@ function setDirection(playerIdx, dir) {
 if (isPaused || isGameOver) return;
 if (!snakes[playerIdx] || !snakes[playerIdx].alive) return;
 const p = snakes[playerIdx];
+// ★ 合作模式复活等待中：玩家第一次按方向就解除等待，从出生点正常起步
+if (p.coopWaiting) {
+  p.coopWaiting = false;
+  p.invincibleUntil = performance.now() + 1500;
+}
 if (dir==='up' && p.dir.y===0) p.nextDir={x:0,y:-1};
 else if (dir==='down' && p.dir.y===0) p.nextDir={x:0,y:1};
 else if (dir==='left' && p.dir.x===0) p.nextDir={x:-1,y:0};
@@ -1635,8 +2227,8 @@ function triggerActiveSkill(playerIdx) {
       const fy = head.y + dir.y * i;
       if (fx < 0 || fx >= COLS || fy < 0 || fy >= ROWS) break;
       cells.push({x: fx, y: fy});
-      if (obstacles.some(o => o.x === fx && o.y === fy)) {
-        obstacles = obstacles.filter(o => !(o.x === fx && o.y === fy));
+      if (hasObstacleAt(fx, fy)) {
+        removeObstacleAt(fx, fy);
         spawnParticles(fx, fy, '#ffaa00');
       }
       if (catActive && cat && cat.x === fx && cat.y === fy) {
@@ -1650,7 +2242,7 @@ function triggerActiveSkill(playerIdx) {
           p.score += 100;
           if (gameMode === 'single') score = p.score;
           scoreEl.textContent = p.score;
-          if (gameMode === 'single' && currentSeedId === null && p.score > highScore) { highScore = p.score; highScoreEl.textContent = highScore; localStorage.setItem(HIGH_KEY, highScore); }
+          updateHighScore(p.score);
           showCheatToast('🐲 龙符咒·炎爆！两次全中，野猫被烧死 +100 分！', 1600);
         } else {
           showCheatToast('🐲 炎爆击中野猫！猫停 1 次移动（已击中 ' + p.longHitCatCount + '/2）', 1200);
@@ -1700,6 +2292,8 @@ function startGame() {
   startBtn.style.display='block';
   overlay.classList.remove('paused');
   stopLoop();
+  // ★ 合作模式的生命条只在合作局显示，其它模式进来先隐藏干净
+  setCoopLivesHudVisible(gameMode === 'coop');
   initGame();
   applyEquippedItem();
   startLoop();
@@ -1710,6 +2304,12 @@ function startGame() {
 window.__startSeedGame = function(seedId) {
   currentSeedId = seedId;
   gameMode = 'single';
+  setCoopLivesHudVisible(false);
+  startGame();
+};
+// ★ 合作模式入口：与双人模式共用皮肤选择弹窗，选完直接开打
+window.__startCoopGame = function() {
+  setCoopLivesHudVisible(true);
   startGame();
 };
 window.__clearSeedMode = function() {

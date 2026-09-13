@@ -11,7 +11,8 @@ achieveListEl.appendChild(item);
 achieveCountEl.textContent = unlockedCount + '/' + ACHIEVEMENTS.length;
 }
 function checkAchievements() {
-if (gameMode === 'double') { renderAchievements(); return; }
+// 双人与合作模式都不参与普通成就
+if (gameMode === 'double' || gameMode === 'coop') { renderAchievements(); return; }
 let newly = [];
 ACHIEVEMENTS.forEach(a => { if (!unlocked.includes(a.id) && a.check()) { unlocked.push(a.id); newly.push(a); } });
 if (newly.length) { saveAchievements(); renderAchievements(); newly.forEach((a,i)=>setTimeout(()=>showAchieveToast(a), i*1800)); } else renderAchievements();
@@ -28,7 +29,7 @@ setTimeout(()=>{ t.style.opacity='0'; setTimeout(()=>t.remove(), 500); }, dur);
 }
 function cheatUnlockSkins() {
 Object.values(SKINS).forEach(s => { if (s.unlockId) cheatSkins.add(s.unlockId); });
-localStorage.setItem('snakeCheatSkins', JSON.stringify([...cheatSkins]));
+SM.setJSON('snakeCheatSkins', [...cheatSkins]);
 renderSkins(); draw();
 showCheatToast('🐉 520 作弊成功 · 全部皮肤已解锁！');
 }
@@ -191,7 +192,11 @@ Object.values(SKINS).forEach(skin => {
 const unlockedSkin = isSkinUnlocked(skin);
 const card = document.createElement('div');
 card.className = 'skin-card' + (currentSkinId === skin.id ? ' active' : '') + (!unlockedSkin ? ' locked' : '');
-card.innerHTML = '<div class="skin-emoji">'+skin.emoji+'</div><div class="skin-name">'+skin.name+'</div>'+( !unlockedSkin ? '<div class="skin-lock">🔒 未解锁</div>' : (currentSkinId === skin.id ? '<div class="skin-lock" style="color:#00f5d4">使用中</div>' : '') );
+// ★ 棋盘风格标签：让玩家一眼看出每套皮肤是「暖派 / 冷派 / 暗派」，
+//   这样"不同风格"是刻意设计而不是杂乱（未解锁时不显示，避免信息过载）
+card.innerHTML = '<div class="skin-emoji">'+skin.emoji+'</div><div class="skin-name">'+skin.name+'</div>'
++ (unlockedSkin && skin.boardStyle ? '<div class="skin-style">'+skin.boardStyle+'</div>' : '')
++ ( !unlockedSkin ? '<div class="skin-lock">🔒 未解锁</div>' : (currentSkinId === skin.id ? '<div class="skin-lock" style="color:#00f5d4">使用中</div>' : '') );
 if (unlockedSkin) card.addEventListener('click', () => {
 if (isPaused || (loopActive && !isGameOver)) {
 showCheatToast('⏸️ 游戏中无法换皮肤，请结束本局后再试', 1200);
@@ -199,8 +204,8 @@ return;
 }
 currentSkinId = skin.id;
 boardSkinId = skin.id;
-localStorage.setItem('snakeCurrentSkin', currentSkinId);
-localStorage.setItem('snakeBoardSkin', boardSkinId);
+SM.safeSet('snakeCurrentSkin', currentSkinId);
+SM.safeSet('snakeBoardSkin', boardSkinId);
 renderSkins();
 if (!isGameOver && snakes[0]) {
 const skinObj = SKINS[currentSkinId] || SKINS.default;
@@ -290,7 +295,7 @@ function renderSeedList() {
   SEED_LEVELS.forEach(level => {
     const key = SEED_HIGH_KEY_PREFIX + level.id;
     let best = 0;
-    try { best = parseInt(localStorage.getItem(key) || '0'); } catch(e) { best = 0; }
+    best = SM.getInt(key, 0, 0, 99999999);
     const card = document.createElement('div');
     card.className = 'seed-card';
     const tags = [];
@@ -347,7 +352,8 @@ function renderShop() {
   const contentEl = document.getElementById('shopContent');
   if (!contentEl) return;
 
-  if (gameMode === 'double') {
+  // ★ 合作模式与双人对战一样，道具按 P1/P2 各自背包管理
+  if (gameMode === 'double' || gameMode === 'coop') {
     contentEl.innerHTML = currentShopTab === 'shop' ? renderShopItemsDouble() : renderInventoryItemsDouble();
   } else {
     contentEl.innerHTML = currentShopTab === 'shop' ? renderShopItemsSingle() : renderInventoryItemsSingle();
@@ -511,7 +517,7 @@ function bindShopEvents() {
   document.querySelectorAll('[data-equip]').forEach(btn => {
     btn.addEventListener('click', () => {
       equippedItem = btn.dataset.equip;
-      localStorage.setItem(EQUIPPED_KEY, equippedItem);
+      SM.safeSet(EQUIPPED_KEY, equippedItem);
       renderShop();
       const item = SHOP_ITEMS.find(x => x.id === equippedItem);
       showCheatToast('✨ 已装备「' + (item ? item.name : '') + '」', 700);
@@ -520,7 +526,7 @@ function bindShopEvents() {
   document.querySelectorAll('[data-unequip]').forEach(btn => {
     btn.addEventListener('click', () => {
       equippedItem = '';
-      localStorage.removeItem(EQUIPPED_KEY);
+      SM.safeRemove(EQUIPPED_KEY);
       renderShop();
     });
   });
@@ -528,7 +534,7 @@ function bindShopEvents() {
   document.querySelectorAll('[data-equip-p1]').forEach(btn => {
     btn.addEventListener('click', () => {
       equippedItemP1 = btn.dataset.equipP1;
-      localStorage.setItem(EQUIPPED_P1_KEY, equippedItemP1);
+      SM.safeSet(EQUIPPED_P1_KEY, equippedItemP1);
       renderShop();
       const item = SHOP_ITEMS.find(x => x.id === equippedItemP1);
       showCheatToast('✨ P1 装备「' + (item ? item.name : '') + '」', 700);
@@ -537,7 +543,7 @@ function bindShopEvents() {
   document.querySelectorAll('[data-unequip-p1]').forEach(btn => {
     btn.addEventListener('click', () => {
       equippedItemP1 = '';
-      localStorage.removeItem(EQUIPPED_P1_KEY);
+      SM.safeRemove(EQUIPPED_P1_KEY);
       renderShop();
     });
   });
@@ -545,7 +551,7 @@ function bindShopEvents() {
   document.querySelectorAll('[data-equip-p2]').forEach(btn => {
     btn.addEventListener('click', () => {
       equippedItemP2 = btn.dataset.equipP2;
-      localStorage.setItem(EQUIPPED_P2_KEY, equippedItemP2);
+      SM.safeSet(EQUIPPED_P2_KEY, equippedItemP2);
       renderShop();
       const item = SHOP_ITEMS.find(x => x.id === equippedItemP2);
       showCheatToast('✨ P2 装备「' + (item ? item.name : '') + '」', 700);
@@ -554,7 +560,7 @@ function bindShopEvents() {
   document.querySelectorAll('[data-unequip-p2]').forEach(btn => {
     btn.addEventListener('click', () => {
       equippedItemP2 = '';
-      localStorage.removeItem(EQUIPPED_P2_KEY);
+      SM.safeRemove(EQUIPPED_P2_KEY);
       renderShop();
     });
   });
@@ -562,9 +568,10 @@ function bindShopEvents() {
 
 // ===== 猫模式按钮 =====
 function updateCatModeBtn() {
+// ★ 双人模式下没有猫；合作模式保留猫（两人都是队友，猫是共同威胁）
 if (gameMode === 'double') {
 catModeEnabled = false;
-localStorage.setItem('snakeCatMode', '0');
+SM.safeSet('snakeCatMode', '0');
 catModeBtn.textContent = '🐱 猫咪: 关(双人)';
 catModeBtn.classList.remove('cat-on');
 catModeBtn.classList.add('cat-off');
@@ -578,7 +585,7 @@ else { catModeBtn.textContent = '🐱 猫咪: 关'; catModeBtn.classList.remove(
 catModeBtn.addEventListener('click', () => {
 if (gameMode === 'double') return;
 catModeEnabled = !catModeEnabled;
-localStorage.setItem('snakeCatMode', catModeEnabled ? '1' : '0');
+SM.safeSet('snakeCatMode', catModeEnabled ? '1' : '0');
 updateCatModeBtn();
 if (catModeEnabled && score >= CAT_ACTIVATE_SCORE && !catActive && !isGameOver) { spawnCat(); }
 if (!catModeEnabled) { catActive = false; cat = null; catTrail = []; }
@@ -591,7 +598,7 @@ else { obsModeBtn.textContent = '🚧 障碍: 关'; obsModeBtn.classList.remove(
 }
 obsModeBtn.addEventListener('click', () => {
 obstacleModeEnabled = !obstacleModeEnabled;
-localStorage.setItem('snakeObstacleMode', obstacleModeEnabled ? '1' : '0');
+SM.safeSet('snakeObstacleMode', obstacleModeEnabled ? '1' : '0');
 updateObsModeBtn();
 if (!obstacleModeEnabled) { obstacles = []; portals = []; }
 });
@@ -599,6 +606,7 @@ if (!obstacleModeEnabled) { obstacles = []; portals = []; }
 // ===== 模式选择按钮 =====
 const modeSingleBtn = document.getElementById('modeSingle');
 const modeDoubleBtn = document.getElementById('modeDouble');
+const modeCoopBtn = document.getElementById('modeCoop');
 
 const isMobileDevice = ('ontouchstart' in window) && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 if (isMobileDevice) {
@@ -610,6 +618,7 @@ if (isMobileDevice) {
 function updateModeButtons() {
 modeSingleBtn.classList.toggle('active', gameMode === 'single' && currentSeedId === null);
 modeDoubleBtn.classList.toggle('active', gameMode === 'double');
+if (modeCoopBtn) modeCoopBtn.classList.toggle('active', gameMode === 'coop');
 }
 modeSingleBtn.addEventListener('click', () => {
 if (gameMode === 'single' && currentSeedId === null) return;
@@ -633,6 +642,20 @@ overlayTitle.textContent = '👥 双人对战';
 overlayMsg.textContent = 'P1 = WASD  ·  P2 = 方向键  ·  先到 300 分或对方先死获胜';
 startBtn.textContent = '开始对战';
 });
+// 💞 合作模式：两人各控一条蛇，但共享 3 条命，命用完才结束
+if (modeCoopBtn) {
+  modeCoopBtn.addEventListener('click', () => {
+    if (gameMode === 'coop') return;
+    if (isMobileDevice) return;
+    gameMode = 'coop';
+    if (typeof window.__clearSeedMode === 'function') window.__clearSeedMode();
+    updateModeButtons();
+    updateCatModeBtn();
+    overlayTitle.textContent = '💞 合作模式';
+    overlayMsg.textContent = 'P1 = WASD  ·  P2 = 方向键  ·  两人共用 3 条命，死一次扣一命，命用完才结束';
+    startBtn.textContent = '一起出发';
+  });
+}
 // 🗺️ 迷宫模式入口（带跳转加载遮罩）
 const modeMazeBtn = document.getElementById('modeMaze');
 if (modeMazeBtn) {
@@ -731,16 +754,21 @@ boardSkinId = dualSelectedBoardId;
 currentSkinId = boardSkinId;
 p1SkinId = dualSelectedP1;
 p2SkinId = dualSelectedP2;
-localStorage.setItem('snakeBoardSkin', boardSkinId);
-localStorage.setItem('snakeCurrentSkin', boardSkinId);
-localStorage.setItem('snakeP1Skin', p1SkinId);
-localStorage.setItem('snakeP2Skin', p2SkinId);
+SM.safeSet('snakeBoardSkin', boardSkinId);
+SM.safeSet('snakeCurrentSkin', boardSkinId);
+SM.safeSet('snakeP1Skin', p1SkinId);
+SM.safeSet('snakeP2Skin', p2SkinId);
 dualSkinModal.classList.remove('show');
 startBtn.style.display = 'block';
 stopLoop();
-initGame();
-applyEquippedItem();
-startLoop();
+// ★ 合作模式走 __startCoopGame（会顺带把共享生命 HUD 打开）
+if (gameMode === 'coop' && typeof window.__startCoopGame === 'function') {
+  window.__startCoopGame();
+} else {
+  initGame();
+  applyEquippedItem();
+  startLoop();
+}
 if (window.__updateSkillBtn) window.__updateSkillBtn();
 }
 });
@@ -767,14 +795,14 @@ if (key === ' ') { togglePause(); return; }
 if (key === 'e') {
   if (typeof triggerActiveSkill === 'function') triggerActiveSkill(0);
 }
-if (key === 'p' && gameMode === 'double') {
+if (key === 'p' && (gameMode === 'double' || gameMode === 'coop')) {
   if (typeof triggerActiveSkill === 'function') triggerActiveSkill(1);
 }
 if (key === 'w') setDirection(0, 'up');
 else if (key === 's') setDirection(0, 'down');
 else if (key === 'a') setDirection(0, 'left');
 else if (key === 'd') setDirection(0, 'right');
-if (gameMode === 'double') {
+if (gameMode === 'double' || gameMode === 'coop') {
 if (key === 'arrowup') setDirection(1, 'up');
 else if (key === 'arrowdown') setDirection(1, 'down');
 else if (key === 'arrowleft') setDirection(1, 'left');
@@ -810,7 +838,8 @@ document.getElementById('mobilePause').addEventListener('click', togglePause);
 
 // ===== 按钮绑定 =====
 startBtn.addEventListener('click', () => {
-if (gameMode === 'double') { openDualSkinModal(); }
+// ★ 合作模式与双人模式共用皮肤选择弹窗（都要选两套蛇皮肤）
+if (gameMode === 'double' || gameMode === 'coop') { openDualSkinModal(); }
 else { startBtn.style.display='block'; startGame(); }
 });
 document.getElementById('achieveBtn').addEventListener('click', () => { renderAchievements(); achieveModal.classList.add('show'); });
@@ -833,9 +862,150 @@ const statsBtnEl = document.getElementById('statsBtn');
 const statsModalEl = document.getElementById('statsModal');
 if (statsBtnEl && statsModalEl) {
   statsBtnEl.addEventListener('click', () => { renderStats(); statsModalEl.classList.add('show'); });
-  document.getElementById('closeStats').addEventListener('click', () => statsModalEl.classList.remove('show'));
+  const closeStatsBtn = document.getElementById('closeStats');
+  if (closeStatsBtn) closeStatsBtn.addEventListener('click', () => statsModalEl.classList.remove('show'));
   statsModalEl.addEventListener('click', (e) => { if (e.target === statsModalEl) statsModalEl.classList.remove('show'); });
 }
+
+// ===== 存档管理面板 =====
+function showSaveStatus(msg, isError) {
+  const el = document.getElementById('saveStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'save-status show ' + (isError ? 'err' : 'ok');
+}
+
+function renderSaveDiag() {
+  const el = document.getElementById('saveDiag');
+  if (!el || !SM) return;
+  const d = SM.diagnose();
+  const kb = (d.approxBytes / 1024).toFixed(1);
+  let html = '';
+  html += '<div class="diag-row"><span>存储状态</span><span class="diag-val">' +
+    (d.persistent ? '✅ 正常持久化' : '⚠️ 仅内存（刷新会丢）') + '</span></div>';
+  html += '<div class="diag-row"><span>存档体积</span><span class="diag-val">' + kb + ' KB</span></div>';
+  html += '<div class="diag-row"><span>数据损坏</span><span class="diag-val">' +
+    (d.corrupted.length ? '⚠️ ' + d.corrupted.length + ' 项已重置' : '✅ 无') + '</span></div>';
+  if (d.issues.length) {
+    html += '<div class="diag-row" style="flex-direction:column;align-items:flex-start;gap:4px;"><span>提示</span><span class="diag-val" style="text-align:left;">' +
+      d.issues.join('<br>') + '</span></div>';
+  }
+  el.innerHTML = html;
+}
+
+function openSaveModal() {
+  const modal = document.getElementById('saveModal');
+  if (!modal) return;
+  // 每次打开都收起表单、清掉上次的提示，避免残留误导
+  const ef = document.getElementById('saveExportField');
+  const inf = document.getElementById('saveImportField');
+  const st = document.getElementById('saveStatus');
+  if (ef) ef.style.display = 'none';
+  if (inf) inf.style.display = 'none';
+  if (st) st.className = 'save-status';
+  renderSaveDiag();
+  modal.classList.add('show');
+}
+
+function bindSaveModal() {
+  const modal = document.getElementById('saveModal');
+  if (!modal || !SM) return;
+
+  const saveBtn = document.getElementById('saveBtn');
+  if (saveBtn) saveBtn.addEventListener('click', openSaveModal);
+
+  const closeBtn = document.getElementById('closeSave');
+  if (closeBtn) closeBtn.addEventListener('click', () => modal.classList.remove('show'));
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.remove('show'); });
+
+  // 点遮罩以外的地方不处理；ESC 关闭
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.classList.contains('show')) modal.classList.remove('show');
+  });
+
+  // --- 导出 ---
+  const exportBtn = document.getElementById('saveExportBtn');
+  if (exportBtn) exportBtn.addEventListener('click', () => {
+    const field = document.getElementById('saveExportField');
+    const ta = document.getElementById('saveExportText');
+    const importField = document.getElementById('saveImportField');
+    try {
+      const text = SM.exportSave();
+      if (ta) ta.value = text;
+      if (field) field.style.display = 'block';
+      if (importField) importField.style.display = 'none';
+      showSaveStatus('✅ 存档已生成，请完整复制保存', false);
+    } catch (e) {
+      console.warn('导出失败:', e);
+      showSaveStatus('❌ 导出失败，请重试', true);
+    }
+  });
+
+  // --- 复制到剪贴板（带降级方案） ---
+  const copyBtn = document.getElementById('saveCopyBtn');
+  if (copyBtn) copyBtn.addEventListener('click', () => {
+    const ta = document.getElementById('saveExportText');
+    if (!ta || !ta.value) { showSaveStatus('请先点「导出存档」', true); return; }
+    const done = () => showSaveStatus('✅ 已复制到剪贴板', false);
+    const fallback = () => {
+      // 老浏览器 / 非 HTTPS 环境不支持 clipboard API 时，退回手动全选
+      try {
+        ta.removeAttribute('readonly');
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        document.execCommand('copy');
+        ta.setAttribute('readonly', 'readonly');
+        done();
+      } catch (e) {
+        ta.setAttribute('readonly', 'readonly');
+        showSaveStatus('⚠️ 复制失败，请手动全选文本框内容复制', true);
+      }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(ta.value).then(done).catch(fallback);
+    } else {
+      fallback();
+    }
+  });
+
+  // --- 打开导入区 ---
+  const importBtn = document.getElementById('saveImportBtn');
+  if (importBtn) importBtn.addEventListener('click', () => {
+    const inf = document.getElementById('saveImportField');
+    const ef = document.getElementById('saveExportField');
+    if (inf) inf.style.display = 'block';
+    if (ef) ef.style.display = 'none';
+    const ta = document.getElementById('saveImportText');
+    if (ta) { ta.value = ''; ta.focus(); }
+    showSaveStatus('把存档内容粘贴到上面的框里，再点「确认导入」', false);
+  });
+
+  // --- 确认导入 ---
+  const confirmBtn = document.getElementById('saveConfirmImportBtn');
+  if (confirmBtn) confirmBtn.addEventListener('click', () => {
+    const ta = document.getElementById('saveImportText');
+    if (!ta || !ta.value.trim()) { showSaveStatus('请先粘贴存档内容', true); return; }
+    const res = SM.importSave(ta.value);
+    if (res.ok) {
+      showSaveStatus('✅ 成功导入 ' + res.count + ' 项，正在刷新...', false);
+      setTimeout(() => window.location.reload(), 900);
+    } else {
+      showSaveStatus('❌ ' + res.error, true);
+    }
+  });
+
+  // --- 清空存档（二次确认） ---
+  const clearBtn = document.getElementById('saveClearBtn');
+  if (clearBtn) clearBtn.addEventListener('click', () => {
+    const ok = confirm('⚠️ 确定要清空所有存档吗？\n\n成就、皮肤、铜钱、背包、统计数据、迷宫进度、排行榜名字都会被清除，且无法恢复。\n\n建议先「导出存档」备份。');
+    if (!ok) return;
+    SM.clearAll();
+    showSaveStatus('🗑️ 已清空，正在刷新...', false);
+    setTimeout(() => window.location.reload(), 800);
+  });
+}
+
+bindSaveModal();
 
 // ===== 商城按钮绑定 =====
 const shopBtnEl = document.getElementById('shopBtn');
@@ -858,10 +1028,12 @@ const skillCountEl = document.getElementById('skillCount');
 function updateSkillBtn() {
   if (!skillBtnEl) return;
   const p = snakes && snakes[0];
-  if (!p || gameMode !== 'single' || isGameOver) {
+  // 手机端的技能按钮只服务单人（双人/合作要两套按钮与两套按键，暂不提供）
+  if (!p || (gameMode !== 'single' && gameMode !== 'coop') || isGameOver) {
     skillBtnEl.style.display = 'none';
     return;
   }
+  if (gameMode === 'coop') { skillBtnEl.style.display = 'none'; return; }
   const skin = p.skinId;
   let left = 0, emoji = '✨';
   if (skin === 'she') { left = p.ghostLeft || 0; emoji = '🐍'; }
@@ -900,25 +1072,25 @@ document.addEventListener('keydown', unlockBgm, { once: true });
 document.addEventListener('touchstart', unlockBgm, { once: true });
 
 // ===== 加载与启动 =====
+// 唯一需要等待的资源是本地图集 assets/atlas.png（atlas.js 已通过 <script> 同步加载）。
+// 加载成功 → 进入游戏；加载失败/超时 → 仍然进入游戏，画面会自动退化为矢量图形。
 function startLoadingScreen() {
 const loadingScreen = document.getElementById('loadingScreen');
 const progressBar = document.getElementById('loadingProgress');
 const loadingText = document.getElementById('loadingText');
 loadingScreen.style.display = 'flex';
 document.getElementById('overlay').classList.add('hidden');
-let loadedCount = 0;
-const total = 1; // 只需要等 atlas.png（atlas.js 已通过 <script> 同步加载）
+const total = 1;
 let finished = false;
-function updateProgress() { const pct = Math.floor(loadedCount / total * 100); progressBar.style.width = pct + '%'; loadingText.textContent = pct + '%'; }
+function updateProgress() { progressBar.style.width = '100%'; loadingText.textContent = '100%'; }
 function finish() {
 if (finished) return;
 finished = true;
-progressBar.style.width = '100%';
-loadingText.textContent = '100%';
+updateProgress();
 setTimeout(() => {
 loadingScreen.style.display = 'none';
-p1SkinId = localStorage.getItem('snakeP1Skin') || 'default';
-p2SkinId = localStorage.getItem('snakeP2Skin') || 'default';
+p1SkinId = readSkinId('snakeP1Skin') || 'default';
+p2SkinId = readSkinId('snakeP2Skin') || 'default';
 initGame();
 renderAchievements();
 draw();
@@ -933,84 +1105,143 @@ if (window.__updateSkillBtn) window.__updateSkillBtn();
 }, 300);
 }
 let done = false;
-const complete = () => { if (done) return; done = true; loadedCount++; updateProgress(); finish(); };
-const timer = setTimeout(() => { console.warn('atlas.png 加载超时'); complete(); }, 8000);
+const complete = () => { if (done) return; done = true; finish(); };
+const timer = setTimeout(() => { console.warn('atlas.png 加载超时，使用矢量兜底图形'); complete(); }, 8000);
 atlasImg.onload = () => { clearTimeout(timer); complete(); };
-atlasImg.onerror = () => { console.warn('atlas.png 加载失败'); clearTimeout(timer); complete(); };
+atlasImg.onerror = () => { console.warn('atlas.png 加载失败，使用矢量兜底图形'); clearTimeout(timer); complete(); };
 atlasImg.src = ATLAS_IMAGE_URL;
 }
 
 Object.values(BGM).forEach(url => { const pre = new Audio(); pre.preload = 'auto'; pre.src = url; });
 audio.src = BGM.menu;
 startLoadingScreen();
+
 // ==================== ★ 排行榜前端逻辑 ★ ====================
 const LEADERBOARD_API = 'https://zhipu.wange5232.workers.dev/leaderboard';
 
 let currentLbSeedId = null;
+let lbRequestToken = 0;   // 防止快速切换关卡时，旧请求把新结果覆盖掉
+
+// HTML 转义，避免玩家名里的特殊字符破坏页面结构
+function escapeHtml(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 
 // 打开排行榜弹窗
 function openLeaderboard(seedId) {
-  if (!seedId) return;
+  seedId = parseInt(seedId, 10);
+  if (!seedId || !SEED_LEVELS.some(s => s.id === seedId)) seedId = SEED_LEVELS[0].id;
   currentLbSeedId = seedId;
+
   const modal = document.getElementById('leaderboardModal');
   const content = document.getElementById('leaderboardContent');
   const title = document.getElementById('leaderboardTitle');
-  
+  if (!modal || !content) return;
+
   const seedInfo = SEED_LEVELS.find(s => s.id === seedId);
-  title.textContent = '🏆 ' + (seedInfo ? seedInfo.name : '种子局') + ' 排行榜';
-  
-  content.innerHTML = '<div class="leaderboard-loading">加载中...</div>';
+  if (title) title.textContent = '🏆 ' + (seedInfo ? seedInfo.name : '种子局') + ' 排行榜';
+
+  // 关卡切换条：让玩家不用退回种子局列表就能翻看别的排行榜
+  content.innerHTML =
+    '<div class="lb-tabs">' +
+      SEED_LEVELS.map(l =>
+        '<button class="lb-tab' + (l.id === seedId ? ' active' : '') + '" data-seed="' + l.id + '">' +
+          l.emoji + ' ' + escapeHtml(l.name) +
+        '</button>'
+      ).join('') +
+    '</div>' +
+    '<div class="leaderboard-loading">加载中...</div>';
+
   modal.classList.add('show');
-  
   fetchLeaderboard(seedId);
 }
 
 // 拉取数据并渲染
 async function fetchLeaderboard(seedId) {
   const content = document.getElementById('leaderboardContent');
+  if (!content) return;
+
+  const token = ++lbRequestToken;
+  // 保留切换条，只替换下面的列表区
+  const tabsHtml = content.querySelector('.lb-tabs')
+    ? content.querySelector('.lb-tabs').outerHTML
+    : '';
+  const body = document.createElement('div');
+  body.className = 'lb-body';
+
   try {
     const res = await fetch(LEADERBOARD_API + '/list?seedId=' + seedId + '&limit=20');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
-    
+
+    // 如果用户已经切到别的关卡了，这次结果作废
+    if (token !== lbRequestToken) return;
+
     if (!data.leaderboard || data.leaderboard.length === 0) {
-      content.innerHTML = '<div class="leaderboard-empty">🏜️ 暂无记录，快来抢第一！</div>';
-      return;
+      body.innerHTML = '<div class="leaderboard-empty">🏜️ 暂无记录，快来抢第一！</div>';
+    } else {
+      const myName = SM.getString('snakePlayerName', '');
+      let html = '<div class="leaderboard-list">';
+      data.leaderboard.forEach(item => {
+        const medal = item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : '#' + item.rank;
+        const isMe = item.playerName === myName ? ' is-me' : '';
+        html += '<div class="leaderboard-row' + isMe + '">' +
+          '<span class="lb-rank">' + medal + '</span>' +
+          '<span class="lb-name">' + escapeHtml(item.playerName) + '</span>' +
+          '<span class="lb-score">' + escapeHtml(item.score) + '</span>' +
+        '</div>';
+      });
+      html += '</div>';
+      body.innerHTML = html;
     }
-    
-    let html = '<div class="leaderboard-list">';
-    const myName = localStorage.getItem('snakePlayerName') || '';
-    
-    data.leaderboard.forEach(item => {
-      const medal = item.rank === 1 ? '🥇' : item.rank === 2 ? '🥈' : item.rank === 3 ? '🥉' : '#' + item.rank;
-      const isMe = item.playerName === myName ? ' is-me' : '';
-      html += `<div class="leaderboard-row${isMe}">
-        <span class="lb-rank">${medal}</span>
-        <span class="lb-name">${item.playerName}</span>
-        <span class="lb-score">${item.score}</span>
-      </div>`;
-    });
-    html += '</div>';
-    content.innerHTML = html;
   } catch (e) {
+    if (token !== lbRequestToken) return;
     console.warn('排行榜拉取失败:', e);
-    content.innerHTML = '<div class="leaderboard-empty">📡 加载失败，请检查网络后重试</div>';
+    body.innerHTML = '<div class="leaderboard-empty">📡 加载失败，请检查网络后重试</div>';
   }
+
+  if (token !== lbRequestToken) return;
+  content.innerHTML = tabsHtml;
+  content.appendChild(body);
 }
 
 // 绑定排行榜弹窗事件
+// 说明：HTML 里并没有 openLeaderboardBtn 这个元素（排行榜是从种子局卡片的 🏆 进入的），
+// 所以这里改用事件委托，既能覆盖当前的关闭按钮，日后新增入口按钮也能直接生效。
 document.addEventListener('DOMContentLoaded', () => {
-  const lbBtn = document.getElementById('openLeaderboardBtn');
   const lbModal = document.getElementById('leaderboardModal');
-  const closeLbBtn = document.getElementById('closeLeaderboard');
-  
-  if (lbBtn) {
-    lbBtn.addEventListener('click', () => {
-      const seedModal = document.getElementById('seedModal');
-      if (seedModal) seedModal.classList.remove('show');
-      // 默认打开第一个种子局的排行榜，或者提示用户
-      openLeaderboard(1); 
-    });
-  }
-  if (closeLbBtn) closeLbBtn.addEventListener('click', () => lbModal.classList.remove('show'));
-  if (lbModal) lbModal.addEventListener('click', (e) => { if (e.target === lbModal) lbModal.classList.remove('show'); });
+  if (!lbModal) return;
+
+  // ① 关卡切换：委托监听，按钮是动态生成的也有效
+  lbModal.addEventListener('click', (e) => {
+    const tab = e.target.closest('.lb-tab');
+    if (tab) {
+      const seedId = parseInt(tab.dataset.seed, 10);
+      if (seedId && seedId !== currentLbSeedId) openLeaderboard(seedId);
+      return;
+    }
+    // 点击遮罩空白处关闭
+    if (e.target === lbModal) lbModal.classList.remove('show');
+  });
+
+  // ② 关闭按钮：委托 + 兜底绑定（id 为 closeLeaderboard）
+  lbModal.addEventListener('click', (e) => {
+    if (e.target.closest('#closeLeaderboard')) lbModal.classList.remove('show');
+  });
+
+  // ③ 兼容：若日后 HTML 里补上了「排行榜」入口按钮，这里自动生效，无需再改代码
+  document.addEventListener('click', (e) => {
+    const entry = e.target.closest('[data-open-leaderboard]');
+    if (!entry) return;
+    const seedModal = document.getElementById('seedModal');
+    if (seedModal) seedModal.classList.remove('show');
+    openLeaderboard(entry.dataset.openLeaderboard || SEED_LEVELS[0].id);
+  });
+
+  // ④ ESC 关闭
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && lbModal.classList.contains('show')) lbModal.classList.remove('show');
+  });
 });
