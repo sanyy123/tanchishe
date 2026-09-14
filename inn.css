@@ -1,4 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+/* ★ 已移除 Google Fonts 的 @import。
+   原因：fonts.googleapis.com 在国内访问不通，而 CSS 顶部的 @import 会阻塞整个样式表的
+   解析与渲染 —— 每次打开页面都要白等一次连接超时，是手机端"加载很久"的主要元凶之一。
+   现在改用系统字体栈：中文本就由系统字体渲染（Nunito 不含中文字形），
+   只有数字/英文的字形会略有变化，换来的是零字体请求、零渲染阻塞。 */
 
 /* ==========================================================================
    🏮 江湖客栈 · 独立页面样式
@@ -37,7 +41,7 @@
 
 body {
   min-height: 100vh;
-  font-family: 'Nunito', 'Microsoft YaHei', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', Roboto, 'Helvetica Neue', Arial, sans-serif;
   color: var(--t-hi);
   background: radial-gradient(ellipse at center top, #2b1a10 0%, #1a0f08 60%, #0a0603 100%);
   overflow-x: hidden;
@@ -86,7 +90,7 @@ body::before {
   background: rgba(60,36,20,0.9);
   border: 1px solid rgba(255,204,0,0.3);
   color: var(--c-gold);
-  font-family: 'Nunito', sans-serif;
+  font-family: inherit;
   font-weight: 700;
   font-size: 0.85rem;
   padding: 8px 16px;
@@ -133,9 +137,9 @@ body::before {
   position: relative;
   width: 100%;
   max-width: 1200px;
-  height: 70vh;
-  min-height: 520px;
-  max-height: 720px;
+  height: 84vh;
+  min-height: 700px;
+  max-height: 860px;
   margin-bottom: 20px;
   z-index: 2;
 }
@@ -177,7 +181,7 @@ body::before {
 .inn-hostess {
   position: absolute;
   left: 50%;
-  top: 44%;
+  top: 48%;
   transform: translate(-50%, -50%);
   text-align: center;
   z-index: 5;
@@ -429,6 +433,11 @@ body::before {
 }
 
 /* ---------- 头顶气泡 ---------- */
+/* ★ 气泡弹出时，把整个房间提到最上层。
+   原因：.inn-room 带 transform，会形成独立层叠上下文，
+   气泡自身的 z-index 无法突破房间边界，会被相邻房间的木屋盖住。 */
+.inn-room.bubble-open { z-index: 40; }
+
 .room-bubble {
   position: absolute;
   left: 50%;
@@ -516,20 +525,26 @@ body::before {
   .inn-title p { font-size: 0.7rem; }
   .inn-back-btn { font-size: 0.75rem; padding: 7px 12px; }
   .inn-wallet { font-size: 0.8rem; padding: 7px 10px; }
-  .inn-scene { height: 62vh; min-height: 440px; }
+  .inn-scene { height: 78vh; min-height: 620px; max-height: none; }
   .hostess-svg { width: 110px; height: 132px; }
   .hostess-dialog { font-size: 0.72rem; max-width: 180px; }
-  .inn-room { width: 108px; }
-  .room-house { width: 68px; height: 62px; }
-  .room-house::before { border-left-width: 38px; border-right-width: 38px; border-bottom-width: 20px; }
-  .room-house::after { border-left-width: 29px; border-right-width: 29px; border-bottom-width: 15px; top: 2px; }
-  .room-body { left: 5px; right: 5px; top: 19px; }
-  .room-body::before { width: 22px; height: 18px; }
-  .room-body::after { width: 18px; height: 24px; }
-  .room-emoji { font-size: 1.7rem; top: -12px; }
-  .room-name { font-size: 0.75rem; }
-  .room-title { font-size: 0.62rem; }
-  .inn-lantern { font-size: 1.5rem; }
+  /* ★ 房间收窄到 88px：12 个住客要在手机窄屏上互不重叠。
+     底部一排 4 个房间的横向间距只有 24%，而房间宽度必须小于这个间距
+     （108px 时占屏宽约 29%，底部一排会互相压住、中间那颗还会顶到上一排）。 */
+  .inn-room { width: 88px; }
+  .room-house { width: 55px; height: 51px; }
+  .room-house::before { border-left-width: 31px; border-right-width: 31px; border-bottom-width: 16px; }
+  .room-house::after { border-left-width: 24px; border-right-width: 24px; border-bottom-width: 12px; top: 2px; }
+  .room-body { left: 4px; right: 4px; top: 16px; }
+  .room-body::before { width: 18px; height: 15px; }
+  .room-body::after { width: 15px; height: 20px; }
+  .room-emoji { font-size: 1.4rem; top: -10px; }
+  .room-name { font-size: 0.66rem; }
+  .room-title { font-size: 0.56rem; }
+  .room-aff { margin-top: 7px; padding: 5px 6px 6px; }
+  .room-aff-num { font-size: 0.6rem; }
+  .room-bubble { max-width: 130px; }
+  .inn-lantern { font-size: 1.4rem; }
 }
 
 /* ==========================================================================
@@ -742,7 +757,7 @@ body::before {
   border: 1px solid rgba(255,204,0,0.4);
   background: rgba(60,36,20,0.85);
   color: #ffcc00;
-  font-family: 'Nunito', sans-serif;
+  font-family: inherit;
   font-weight: 800;
   font-size: 0.9rem;
   cursor: pointer;
@@ -813,7 +828,7 @@ body::before {
   padding: 14px 26px;
   background: linear-gradient(135deg, #ff6b6b, #ffcc00);
   color: #2b1a10;
-  font-family: 'Nunito', sans-serif;
+  font-family: inherit;
   font-weight: 800;
   font-size: 0.95rem;
   border-radius: var(--r-pill);

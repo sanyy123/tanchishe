@@ -29,11 +29,11 @@
 <p class="subtitle">宝宝专属 · 修炼之路由此开启</p>
 </div>
 <div class="top-bar">
-<button class="btn" id="achieveBtn">📜 成就</button>
-<button class="btn" id="skinBtn">🎨 皮肤</button>
-<button class="btn" id="titleBtn">🏅 称号</button>
-<button class="btn" id="shopBtn">🏪 商城</button>
-<button class="btn" id="settingsBtn" onclick="document.getElementById('settingsModal').classList.add('show')">⚙️ 设置</button>
+<button class="btn" id="achieveBtn"><span>📜 成就</span></button>
+<button class="btn" id="skinBtn"><span>🎨 皮肤</span></button>
+<button class="btn" id="titleBtn"><span>🏅 称号</span></button>
+<button class="btn" id="shopBtn"><span>🏪 商城</span></button>
+<button class="btn" id="settingsBtn" onclick="document.getElementById('settingsModal').classList.add('show')"><span>⚙️ 设置</span></button>
 </div>
 <div class="game-wrapper">
 <div class="record-hint" id="recordHint">🏆 还有 100 分就破记录啦！</div>
@@ -111,6 +111,7 @@
       <button class="close-btn" id="closeTitle">×</button>
     </div>
     <div class="title-current" id="titleCurrent"></div>
+    <div class="title-filter" id="titleFilter"></div>
     <div class="title-list" id="titleList"></div>
   </div>
 </div>
@@ -276,5 +277,15 @@
 <script src="assets/atlas.js"></script>
 <script src="game.js"></script>
 <script src="ui.js"></script>
+<script>
+// 注册 Service Worker：把客栈页、迷宫页要用的资源提前缓存好，
+// 之后页面之间的跳转就走本地缓存，手机上几乎秒开。
+// 注册失败（隐私模式、非 HTTPS 等）完全不影响游戏任何功能。
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
 </body>
 </html>

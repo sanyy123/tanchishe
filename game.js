@@ -191,6 +191,10 @@ const VALID_SKIN_IDS = ACHIEVEMENTS.filter(a => a.id.startsWith('skin_')).map(a 
 let cheatSkins = new Set(SM.getStringArray('snakeCheatSkins', VALID_SKIN_IDS));
 let specialFood = null, specialFoodTimer = 0;
 const SPECIAL_FOOD_DURATION = 8000;
+// ★ 特殊食物持续时间：分数越高越短（8000ms → 5000ms）
+function getSpecialFoodDuration() {
+  return Math.max(5000, 8000 - Math.floor(score / 200) * 500);
+}
 let specialFoodCooldown = 0;
 let cat = null, catActive = false;
 const CAT_ACTIVATE_SCORE = 250;
@@ -202,7 +206,7 @@ let portals = [];
 let portalPairCounter = 0;
 let obstacleModeEnabled = SM.getBool('snakeObstacleMode', true);
 const OBSTACLE_SCORE = 150, OBSTACLE_MAX = 25;
-const PORTAL_SCORE = 400, PORTAL_MAX_PAIRS = 2;
+const PORTAL_SCORE = 200, PORTAL_MAX_PAIRS = 3;
 const PORTAL_DURATION = 15000;
 const PORTAL_COLORS = ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a06cd5'];
 const WIN_SCORE = 300;
@@ -289,14 +293,74 @@ if (!frame) return false;
 return drawAtlasFrame(frame, cx, cy, dpx);
 }
 
+// ★ 咕嘎皮肤专用绘制入口（2026-09-14）
+// 那 6 张素材是「从 500×500 大图上裁掉透明边」导出的，各帧长宽比差得很远
+// （企鹅全身 216×391、像素女孩 187×188、装饰字 406×337），而 drawAtlasFrame 是按
+// sourceSize（500×500）来缩放的 —— 那样算下来这 6 张会被缩得比其它皮肤小一大截，
+// 而且两张尾巴图体量还不一样。所以给它们单独一个「最长边对齐到 box」的画法，
+// 这样传一个 box 尺寸，6 张素材的视觉大小就自动统一了。
+function drawAtlasFrameBox(frame, cx, cy, box) {
+if (!frame || !atlasImg.complete || !atlasImg.naturalWidth) return false;
+const fr = frame.frame;
+if (!fr) return false;
+const s = box / Math.max(fr.w, fr.h);
+const w = fr.w * s, h = fr.h * s;
+ctx.drawImage(atlasImg, fr.x, fr.y, fr.w, fr.h, cx - w / 2, cy - h / 2, w, h);
+return true;
+}
+function drawBoxHelper(key, cx, cy, box) {
+if (!key) return false;
+const frame = getAtlasFrame(key);
+if (!frame) return false;
+return drawAtlasFrameBox(frame, cx, cy, box);
+}
+
 
 const audio = new Audio(); audio.loop = true; audio.volume = 0.45; audio.preload = 'auto';
 audio.addEventListener('ended', () => { if (musicEnabled && currentBgmKey) { audio.currentTime = 0; audio.play().catch(()=>{}); } });
-audio.addEventListener('error', () => { if (musicEnabled && currentBgmKey) { clearTimeout(bgmRetryTimer); bgmRetryTimer = setTimeout(() => { const url = BGM[currentBgmKey]; if (url) { audio.src = url; audio.play().catch(()=>{}); } }, 1500); } });
+// 加载失败重试：最多 3 次。原来是无上限重试，一旦 bgm 文件缺失（比如部署时漏传目录）
+// 就会每 1.5 秒重试一次、永远不停。
+let bgmRetryCount = 0;
+audio.addEventListener('error', () => {
+  if (!musicEnabled || !currentBgmKey) return;
+  if (bgmRetryCount >= 3) return;
+  bgmRetryCount++;
+  clearTimeout(bgmRetryTimer);
+  bgmRetryTimer = setTimeout(() => {
+    const url = BGM[currentBgmKey];
+    if (url) { audio.src = url; audio.play().catch(()=>{}); }
+  }, 1500);
+});
 document.addEventListener('visibilitychange', () => { if (!document.hidden && musicEnabled && currentBgmKey && audio.paused) audio.play().catch(()=>{}); });
-function playBgm(key) { if (!musicEnabled || !BGM[key]) return; if (key === currentBgmKey && !audio.paused) return; currentBgmKey = key; audio.src = BGM[key]; audio.load(); const p = audio.play(); if (p) p.catch(()=>{}); }
+// 切换 BGM。
+// ★ 关键：同一首时只确保它在播，绝不重新赋 src —— 重新赋值会让浏览器丢弃已解码的音频、
+//   从头再下一次，这正是"切阶段 / 切页面时音乐卡一下"的来源。
+function playBgm(key) {
+  if (!musicEnabled || !BGM[key]) return;
+  if (key === currentBgmKey) {
+    if (audio.paused) { const p = audio.play(); if (p) p.catch(()=>{}); }
+    return;
+  }
+  currentBgmKey = key;
+  bgmRetryCount = 0;
+  audio.src = BGM[key];   // 赋 src 本身就会触发加载，不必再调 load()
+  const p = audio.play();
+  if (p) p.catch(()=>{});
+}
 function stopBgm() { audio.pause(); currentBgmKey = ''; }
-function getGameStageKey() { return score >= 600 ? 'stage2' : (score >= 250 ? 'stage1' : 'stage0'); }
+// BGM 阶段。
+// ★ 单人看 score；双人/合作模式下 score 只代表 P1（其余玩家的分不写进它），
+//   所以取场上最高分来判断，否则双人局会永远停在 stage0、音乐不随进度升燃。
+function getGameStageKey() {
+  let s = score;
+  if (gameMode !== 'single' && snakes.length > 0) {
+    for (let i = 0; i < snakes.length; i++) {
+      const ps = snakes[i].score || 0;
+      if (ps > s) s = ps;
+    }
+  }
+  return s >= 600 ? 'stage2' : (s >= 250 ? 'stage1' : 'stage0');
+}
 function updateGameBgm() { if (musicEnabled && !isGameOver && !isPaused) playBgm(getGameStageKey()); }
 
 // 成就列表：只保留真实存在的成就 id（防止脏数据让"已解锁 3/19"这类数字失真）
@@ -358,8 +422,13 @@ function updateHighScore(newScore) {
   SM.safeSet(HIGH_KEY, String(highScore));
 }
 
-const BASE_SPEED = 160, MIN_SPEED = 70;
-function calcSpeed() { const step = Math.floor(score/50); return Math.max(MIN_SPEED, BASE_SPEED - step*6); }
+const BASE_SPEED = 160, MIN_SPEED = 60;
+function calcSpeed() {
+  // ★ 分数越高，速度衰减越快（每 50 分加速步长从 6ms 提到 7ms）
+  const step = Math.floor(score / 50);
+  const extra = score >= 500 ? Math.floor((score - 500) / 100) * 2 : 0;
+  return Math.max(MIN_SPEED, BASE_SPEED - step * 6 - extra);
+}
 function vibrate(pattern) {
   if (!navigator.vibrate) return;
   try {
@@ -367,27 +436,119 @@ function vibrate(pattern) {
   } catch (e) {}
 }
 
-// ===== 吃食物音效（音频池） =====
+// ===== 吃食物音效 =====
+// 为什么原来的 <audio> 元素池在手机上会"慢半拍"：
+//   1) 移动端 snd.currentTime = 0 是一次**异步 seek**，紧跟其后的 play() 必须等 seek 完成；
+//   2) iOS/Android 对同时活跃的 <audio> 元素数量有硬限制，池子越大越容易排队；
+//   3) 每次改 playbackRate 都要让音频管线重新处理一遍。
+// 三者叠加，就是"吃到食物，声音晚一拍"。
+// 改用 Web Audio：音频预解码成 AudioBuffer 常驻内存，播放只需新建一个极轻量的
+// SourceNode，从调用到出声通常 < 5ms，且没有并发数限制。
+// 老浏览器或解码还没完成时，自动退回原来的 <audio> 池，保证一定有声音。
+const SFX_URLS = { eat1: './eat1.mp3', eat2: './eat2.mp3' };
 const EAT_POOL_SIZE = 6;
 const eatPool = { normal: [], special: [] };
 let eatPoolIdx = 0;
-(function initEatPool() {
+let eatPoolReady = false;
+
+// 兜底音频池改为"按需创建"：Web Audio 正常工作时，移动端就不必常驻 12 个 <audio> 元素
+function ensureEatPool() {
+  if (eatPoolReady) return;
+  eatPoolReady = true;
   for (let i = 0; i < EAT_POOL_SIZE; i++) {
     const a1 = new Audio('./eat1.mp3'); a1.preload = 'auto'; a1.volume = 0.5;
     const a2 = new Audio('./eat2.mp3'); a2.preload = 'auto'; a2.volume = 0.5;
     eatPool.normal.push(a1);
     eatPool.special.push(a2);
   }
-})();
+}
+
+let audioCtx = null;
+const sfxBuffers = { eat1: null, eat2: null };
+
+function getAudioCtx() {
+  if (audioCtx) return audioCtx;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return null;
+  try { audioCtx = new AC(); } catch (e) { audioCtx = null; }
+  return audioCtx;
+}
+
+// decodeAudioData 在新浏览器返回 Promise，老 Safari 只认回调 —— 两种写法都兼容
+function decodeAudio(ctx, arrayBuffer) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const done = (b) => { if (!settled) { settled = true; resolve(b); } };
+    const fail = (e) => { if (!settled) { settled = true; reject(e); } };
+    const ret = ctx.decodeAudioData(arrayBuffer, done, fail);
+    if (ret && typeof ret.then === 'function') ret.then(done, fail);
+  });
+}
+
+// 预解码音效（每个文件只做一次）。在首次用户交互后调用，避开浏览器自动播放限制。
+function preloadSfx() {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  Object.keys(SFX_URLS).forEach(key => {
+    if (sfxBuffers[key]) return;
+    fetch(SFX_URLS[key])
+      .then(r => r.arrayBuffer())
+      .then(buf => decodeAudio(ctx, buf))
+      .then(decoded => { sfxBuffers[key] = decoded; })
+      .catch(() => {});   // 失败无所谓，后续自动走 <audio> 兜底
+  });
+}
+
+// 用已解码的 AudioBuffer 播一声；成功返回 true
+function playSfxBuffer(key, rate, volume) {
+  const ctx = getAudioCtx();
+  const buf = sfxBuffers[key];
+  if (!ctx || !buf) return false;
+  try {
+    if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = rate;
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+    src.connect(gain);
+    gain.connect(ctx.destination);
+    src.start(0);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// 首次用户交互：解锁音频上下文 + 预解码音效
+let sfxUnlocked = false;
+function unlockSfx() {
+  if (sfxUnlocked) return;
+  sfxUnlocked = true;
+  const ctx = getAudioCtx();
+  if (ctx && ctx.state === 'suspended') ctx.resume().catch(() => {});
+  preloadSfx();
+}
+document.addEventListener('touchstart', unlockSfx, { once: true, passive: true });
+document.addEventListener('mousedown', unlockSfx, { once: true });
+document.addEventListener('keydown', unlockSfx, { once: true });
 
 function playEatSound(playerId, isSpecial, comboCount) {
+  const key = isSpecial ? 'eat2' : 'eat1';
+  const comboPitch = 1 + Math.min((comboCount || 0), 10) * 0.05;
+  const rate = (playerId === 'p2' ? 1.15 : 1.0) * comboPitch;
+
+  // 主路径：Web Audio，几乎零延迟
+  if (playSfxBuffer(key, rate, 0.5)) return;
+
+  // 兜底路径：Web Audio 不可用 / 还没解码完，退回 <audio> 池
   try {
+    ensureEatPool();
     const pool = isSpecial ? eatPool.special : eatPool.normal;
     const snd = pool[eatPoolIdx % EAT_POOL_SIZE];
     eatPoolIdx++;
     snd.currentTime = 0;
-    const comboPitch = 1 + Math.min((comboCount || 0), 10) * 0.05;
-    snd.playbackRate = (playerId === 'p2' ? 1.15 : 1.0) * comboPitch;
+    snd.playbackRate = rate;
     const p = snd.play();
     if (p) p.catch(() => {});
   } catch (e) {}
@@ -400,7 +561,7 @@ function drawImageHelper(key, cx, cy, dpx) {
 return drawFromAtlas(key, cx, cy, dpx);
 }
 function roundRect(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r); c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
-function isWarmSkin(skinId) { return ['shu','niu','hu','tu','long','she','ma','yang'].includes(skinId); }
+function isWarmSkin(skinId) { return ['shu','niu','hu','tu','long','she','ma','yang','hou','ji','gou','zhu','guga'].includes(skinId); }
 
 function createPlayer(id, headColors, bodyHue, startX, startY, startDir, skinId) {
 const body = [{x:startX, y:startY}];
@@ -454,6 +615,17 @@ function applySkinPassive(p) {
   if (p.skinId === 'yang') { p.yangLeft = 3; }
 }
 
+// ★ 咕嘎皮肤：吃到食物时蛇会长一节。这个引擎里"长出来"的那一节就是数组的最后一节
+//   （先 unshift 加新头，不吃才 pop，所以吃的那一步尾巴原地留下 = 多出来的一节）。
+//   用户要的就是「每次尾部变长的那一节随机出现」，所以在这一节上重掷一次随机图。
+//   ⚠️ 必须用 Math.random，不能用 gameRng —— gameRng 是种子局共用的随机流，
+//   多消耗一个数会改变后续食物/石头的落点，把固定地图和排行榜成绩全打乱。
+function rerollGugaTail(snakeArr) {
+  if (!snakeArr || snakeArr.length === 0) return;
+  const tailSeg = snakeArr[snakeArr.length - 1];
+  if (tailSeg) tailSeg.tex = Math.random() < 0.5 ? 0 : 1;
+}
+
 function startLoop() { stopLoop(); lastFrameTs=0; accumulator=0; loopActive=true; rafId=requestAnimationFrame(frame); }
 function stopLoop() { loopActive=false; if (rafId) { cancelAnimationFrame(rafId); rafId=null; } }
 function frame(timestamp) {
@@ -462,7 +634,8 @@ if (!lastFrameTs) lastFrameTs = timestamp;
 let delta = timestamp - lastFrameTs;
 lastFrameTs = timestamp;
 if (delta > 100) delta = 100;
-snakes.forEach(p => { if (p.speedBoost > 0) p.speedBoost -= delta; });
+// 用 for 而不是 forEach：这里是每帧都跑的热路径，省掉每帧一个闭包分配
+for (let i = 0; i < snakes.length; i++) { const p = snakes[i]; if (p.speedBoost > 0) p.speedBoost -= delta; }
 if (!isPaused && !isGameOver) {
 accumulator += delta;
 const curSpeed = speed;
@@ -623,10 +796,16 @@ if (valid && food) valid = !(food.x === sf.x && food.y === sf.y);
 if (valid && obstacles.some(o => o.x === sf.x && o.y === sf.y)) valid = false;
 if (valid && portals.some(p => p.x === sf.x && p.y === sf.y)) valid = false;
 }
-if (valid) { specialFood = sf; specialFoodTimer = SPECIAL_FOOD_DURATION; }
+if (valid) { specialFood = sf; specialFoodTimer = getSpecialFoodDuration(); }
 }
 function trySpawnObstacle() {
-if (!obstacleModeEnabled || score < OBSTACLE_SCORE || obstacles.length >= OBSTACLE_MAX) return;
+if (!obstacleModeEnabled || score < OBSTACLE_SCORE) return;
+// ★ 石头数量上限：300 分 18 块 → 600 分 30 块 → 1000 分 40 块
+const maxObstacles = Math.min(45, 10 + Math.floor(score / 30));
+if (obstacles.length >= maxObstacles) return;
+// ★ 生成概率：分数越高越容易刷石头
+const spawnChance = Math.min(0.6, 0.25 + score / 2000);
+if (gameRng() > spawnChance) return;
 if (!snakes[0] || !snakes[0].body || !snakes[0].body[0]) return;
 const head = snakes[0].body[0];
 let attempts = 0;
@@ -648,7 +827,9 @@ break;
 }
 function trySpawnPortal() {
 if (!obstacleModeEnabled || score < PORTAL_SCORE || portals.length >= PORTAL_MAX_PAIRS*2) return;
-if (gameRng() > 0.3) return;
+// ★ 传送门出现概率随分数提升（0.3 → 最高 0.8）
+const chance = Math.min(0.8, 0.3 + score / 1500);
+if (gameRng() > chance) return;
 if (!snakes[0] || !snakes[0].body || !snakes[0].body[0]) return;
 const positions = []; let attempts = 0;
 const head = snakes[0].body[0];
@@ -975,42 +1156,29 @@ function accumulateInnAffinity() {
   const skinId = boardSkinId;
   if (!skinId || skinId === 'default') return;
   const skinObj = SKINS[skinId];
-  if (!skinObj || !skinObj.unlockId) return;    // 只给生肖皮肤加
-  if (!INN_CHARACTERS[skinId]) return;           // 未录入客栈的角色跳过
+  if (!skinObj || !skinObj.unlockId) return;
+  if (!INN_CHARACTERS[skinId]) return;
 
   const p = snakes[0];
   if (!p) return;
-  let gain = 10;                                   // 基础
+  let gain = 10;
   if ((p.foodsEaten || 0) >= 20) gain += 5;
   if ((p.survivalTime || 0) >= 120) gain += 5;
-  // 破纪录：调用处会先跑 updateHighScore，此时 highScore 已更新
-  // 用"分数是否等于当前历史最高"判断会误判，改为读上一局的最高分对比
-  // 这里用最简单的方式：本局分数若等于 highScore 且 > 0 则视为破纪录（同一局只能触发一次）
   if (score > 0 && score === highScore) gain += 20;
 
-  let aff = SM.getJSON(INN_AFFINITY_KEY, {});
-  if (!aff || typeof aff !== 'object' || Array.isArray(aff)) aff = {};
-  const before = aff[skinId] || 0;
-  const after = Math.min(INN_MAX_AFFINITY, before + gain);
-  if (after === before) return;
-  aff[skinId] = after;
-  SM.setJSON(INN_AFFINITY_KEY, aff);
+  // ★ 读 aff + pending，算"有效当前值"
+  const aff = SM.getJSON(INN_AFFINITY_KEY, {});
+  const cleanAff = (aff && typeof aff === 'object' && !Array.isArray(aff)) ? aff : {};
+  const pending = SM.getJSON(INN_PENDING_KEY, {});
+  const cleanPending = (pending && typeof pending === 'object' && !Array.isArray(pending)) ? pending : {};
 
-  // 跨过节点时提示（100/200/300）
-  const tierBefore = getInnTier(before);
-  const tierAfter = getInnTier(after);
-  const name = INN_CHARACTERS[skinId].name;
-  if (tierAfter === 3 && tierBefore < 3) {
-    // ★ 满 300，获得客栈徽章
-    setTimeout(() => {
-      showCheatToast('🏅 恭喜！' + name + ' 与你结为挚友，获得客栈徽章！', 2800);
-    }, 800);
-  } else if (tierAfter > tierBefore) {
-    const tierName = INN_TIER_NAMES[tierAfter];
-    setTimeout(() => {
-      showCheatToast('🏮 ' + name + ' 对你的好感度达到「' + tierName + '」！', 2000);
-    }, 800);
-  }
+  const effectiveBefore = Math.min(INN_MAX_AFFINITY, (cleanAff[skinId] || 0) + (cleanPending[skinId] || 0));
+  if (effectiveBefore >= INN_MAX_AFFINITY) return;   // 已满，不再累积
+
+  // ★ 写入 pending 时也要钳制到上限，避免溢出
+  const newPending = Math.min(gain, INN_MAX_AFFINITY - effectiveBefore);
+  cleanPending[skinId] = (cleanPending[skinId] || 0) + newPending;
+  SM.setJSON(INN_PENDING_KEY, cleanPending);
 }
 
 function gameOver(reason) {
@@ -1142,7 +1310,12 @@ setTimeout(() => {
   isDying = false;
   stopLoop();
   overlayTitle.textContent = '修炼失败';
-  overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && snakes[0] && snakes[0].body ? (' · 积分 '+score+' · 体长 '+snakes[0].body.length) : (gameMode === 'coop' ? (' · 双人合计积分 '+finalScore) : '')) + ' · 🪙 +' + earnedCoins;
+  let awakenText = '';
+  if (gameMode === 'single' && isSkinAwakened(boardSkinId)) {
+    const w = (typeof INN_CHARACTERS !== 'undefined' && INN_CHARACTERS[boardSkinId]) ? INN_CHARACTERS[boardSkinId] : null;
+    if (w && w.awakening) awakenText = ' · 🌟 ' + w.awakening.name + '生效';
+  }
+  overlayMsg.textContent = (reason || '本局结束') + (gameMode === 'single' && snakes[0] && snakes[0].body ? (' · 积分 '+score+' · 体长 '+snakes[0].body.length) : (gameMode === 'coop' ? (' · 双人合计积分 '+finalScore) : '')) + ' · 🪙 +' + earnedCoins + awakenText;
   startBtn.textContent = '再次入世';
   // ★ 结算界面显示佩戴中的称号
   const titleBadgeEl = document.getElementById('resultTitleBadge');
@@ -1195,7 +1368,7 @@ function buildBodySet(body) {
 
 function update() {
 if (isPaused || isGameOver) return;
-if (specialFood) { specialFoodTimer -= speed; if (specialFoodTimer <= 0) { specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 2000; } }
+if (specialFood) { specialFoodTimer -= speed; if (specialFoodTimer <= 0) { specialFood = null; specialFoodTimer = 0; specialFoodCooldown = 1500; } }
 if (specialFoodCooldown > 0) { specialFoodCooldown -= speed; if (specialFoodCooldown < 0) specialFoodCooldown = 0; }
 if (portals.length > 0) {
 const pairsToRemove = new Set();
@@ -1348,6 +1521,7 @@ snake.unshift(head);
 let ateSomething = false;
 if (head.x === food.x && head.y === food.y) {
 ateSomething = true; p.foodsEaten++;
+if (p.skinId === 'guga') rerollGugaTail(snake);
 playEatSound(p.id, false, p.comboCount);
 shakeAmount = 18;
 vibrate([100,40,100]);
@@ -1380,8 +1554,8 @@ let specialChance = 0.35;
 if (gameMode === 'single' && thisRunHasLuopan) specialChance = 0.7;
 else if ((gameMode === 'double' || gameMode === 'coop') && (thisRunHasLuopanP1 || thisRunHasLuopanP2)) specialChance = 0.7;
 if (!specialFood && gameRng() < specialChance) spawnSpecialFood();
-if (p.foodsEaten % 3 === 0) trySpawnObstacle();
-if (p.foodsEaten % 15 === 0) trySpawnPortal();
+if (p.foodsEaten % 2 === 0) trySpawnObstacle();
+if (p.foodsEaten % 8 === 0) trySpawnPortal();
 updateHighScore(p.score);
 if (gameMode === 'double' && p.score >= WIN_SCORE) { const other = snakes.find(x=>x.id!==p.id); if (other) killPlayer(other, p.id.toUpperCase() + ' 率先到达 300 分'); }
 // ★ 合作模式没有"率先到达"的胜负概念，双方同队，达到目标分直接失败结束
@@ -1389,6 +1563,7 @@ if (gameMode === 'coop' && p.score >= WIN_SCORE) { gameOver('合作达成！双�
 lengthEl.textContent = p.body.length;
 } else if (specialFood && head.x === specialFood.x && head.y === specialFood.y) {
 ateSomething = true; p.foodsEaten++;
+if (p.skinId === 'guga') rerollGugaTail(snake);
 playEatSound(p.id, true, p.comboCount);
 shakeAmount = 22;
 vibrate([100,50,100]);
@@ -1690,6 +1865,29 @@ function drawPlainBoard(boardSkin) {
 //   现在改成：所有棋盘都是深色底，只调色相与明度——
 //     鼠=暖棕  牛=墨绿  虎=琥珀  兔=玫红  龙=青碧  蛇=苔绿  马=栗棕  羊=藕紫
 //   这样每套皮肤依然有明显辨识度，但整机视觉是一个体系。
+
+// ★ 咕嘎棋盘装饰的位置表（用户要求：「咕」「嘎」两个装饰字随机分布在棋盘上）。
+//   只在第一次绘制时随机生成一次并缓存，因为棋盘本身是离屏缓存（warmBoardCache），
+//   每帧重新随机会让装饰疯狂跳动。用固定种子的 mulberry32 生成 ——
+//   同一局内位置稳定，刷新页面会换一批布局，既满足「随机」又不会闪。
+let gugaDecorSpots = null;
+function getGugaDecorSpots() {
+  if (gugaDecorSpots) return gugaDecorSpots;
+  const rnd = mulberry32(20260914);
+  const spots = [];
+  let guard = 0;
+  // 拒绝采样：取 16 个位置，两两至少隔 5 格，避免装饰挤成一坨；
+  // guard 是兜底上限，防止边界情况下死循环。
+  while (spots.length < 16 && guard++ < 4000) {
+    const gx = 1 + Math.floor(rnd() * (COLS - 2));
+    const gy = 1 + Math.floor(rnd() * (ROWS - 2));
+    if (spots.some(s => Math.abs(s.gx - gx) < 5 && Math.abs(s.gy - gy) < 5)) continue;
+    spots.push({ gx: gx, gy: gy, key: rnd() < 0.5 ? 'guga_decor_gu' : 'guga_decor_ga' });
+  }
+  gugaDecorSpots = spots;
+  return spots;
+}
+
 function drawWarmBoardDirect(skinId) {
 // ---- 每套皮肤的深色双色格 ----
 // ★ 美术二次调整（按用户要求：不要统一风格，要「每套皮肤各有各的样子」）：
@@ -1711,6 +1909,12 @@ const BOARD_THEME = {
   long: { mode:'light', light:'#eef8f6', dark:'#dcefeb', grid:'rgba(70,168,152,0.30)', tint:'#4fd6c0', deep:'#c9e6e0' },
   she:  { mode:'light', light:'#f1f8ea', dark:'#e2efd4', grid:'rgba(118,166,80,0.30)', tint:'#8fc860', deep:'#d5e8c2' },
   yang: { mode:'light', light:'#f6f1fb', dark:'#eae1f7', grid:'rgba(148,116,196,0.30)', tint:'#a98cd8', deep:'#ded2f0' },
+  hou:  { mode:'light', light:'#fff4e6', dark:'#ffe6cc', grid:'rgba(214,146,74,0.32)', tint:'#e0a55c', deep:'#f7dcb8' },
+  ji:   { mode:'light', light:'#fff8e0', dark:'#ffefb8', grid:'rgba(230,180,60,0.32)', tint:'#e0b830', deep:'#f7e090' },
+  gou:  { mode:'light', light:'#f0e8dc', dark:'#e4d6c0', grid:'rgba(160,120,80,0.32)', tint:'#a87a48', deep:'#d8c4a0' },
+  zhu:  { mode:'light', light:'#fdeef0', dark:'#fadde2', grid:'rgba(220,130,150,0.30)', tint:'#e07a90', deep:'#f5c8d0' },
+  // ---- 咕嘎（用户自制皮肤，暖橙橘子色，配色跟着素材走）----
+  guga: { mode:'light', light:'#fff6ea', dark:'#ffe8ce', grid:'rgba(240,150,60,0.30)', tint:'#f0932e', deep:'#f7dcbc' },
   // ---- 暗派 ----
   default: { mode:'dark', light:'#111826', dark:'#0c121d', grid:'rgba(0,200,220,0.10)', tint:'#00d4c0', deep:'#070a10' }
 }[skinId] || { mode:'dark', light:'#111826', dark:'#0c121d', grid:'rgba(0,200,220,0.10)', tint:'#00d4c0', deep:'#070a10' };
@@ -1782,6 +1986,18 @@ ctx.globalAlpha=1;
 [[3,4],[9,12],[16,5],[22,18],[6,22],[25,9],[11,25],[19,3],[27,15],[13,16],[2,10],[29,6]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; ctx.globalAlpha=DECO_ALPHA; if (!drawImageHelper('horse_decor',bx,by,GRID*1.4)) { ctx.fillStyle=IS_LIGHT_BOARD?'#b87d3c':'#d99b57'; ctx.beginPath(); ctx.arc(bx,by,6,0,Math.PI*2); ctx.fill(); } ctx.globalAlpha=1; });
 } else if (skinId === 'yang') {
 [[3,4],[9,12],[16,5],[22,18],[6,22],[25,9],[11,25],[19,3],[27,15],[13,16],[2,10],[29,6]].forEach(([gx,gy]) => { const bx=gx*GRID+GRID/2; const by=gy*GRID+GRID/2; ctx.globalAlpha=DECO_ALPHA; if (!drawImageHelper('sheep_decor',bx,by,GRID*1.4)) { ctx.fillStyle=IS_LIGHT_BOARD?'#8a68c0':'#a98cd8'; ctx.beginPath(); ctx.moveTo(bx-5,by+3); ctx.quadraticCurveTo(bx-6,by-5,bx,by-6); ctx.quadraticCurveTo(bx+6,by-5,bx+5,by+3); ctx.closePath(); ctx.fill(); } ctx.globalAlpha=1; });
+} else if (skinId === 'guga') {
+// 咕嘎：把「咕」「嘎」两个装饰字按 getGugaDecorSpots() 的位置撒到棋盘上。
+// 用 drawBoxHelper 按最长边统一缩放，两个字的视觉大小才一致（原图一个 406×337 一个 388×351）。
+getGugaDecorSpots().forEach(sp => {
+const bx = sp.gx*GRID + GRID/2, by = sp.gy*GRID + GRID/2;
+ctx.globalAlpha = DECO_ALPHA;
+if (!drawBoxHelper(sp.key, bx, by, GRID*1.5)) {
+  ctx.fillStyle = IS_LIGHT_BOARD ? 'rgba(240,150,60,0.55)' : 'rgba(255,170,80,0.40)';
+  ctx.beginPath(); ctx.arc(bx, by, 6, 0, Math.PI*2); ctx.fill();
+}
+ctx.globalAlpha = 1;
+});
 }
 }
 
@@ -1888,6 +2104,11 @@ else if (boardSkinId === 'long') { ctx.save(); ctx.translate(fx,fy); ctx.scale(p
 else if (boardSkinId === 'she') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper('snake_food',0,0,GRID*1.9)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.ellipse(0,2,9,10,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
 else if (boardSkinId === 'ma') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper('horse_food',0,0,GRID*1.8)) { ctx.fillStyle='#8b5a2b'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
 else if (boardSkinId === 'yang') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawImageHelper('sheep_food',0,0,GRID*1.8)) { ctx.fillStyle='#ffb6c1'; ctx.fillRect(-8,-8,16,16); ctx.fillStyle='#ffe4a0'; ctx.fillRect(-8,-5,16,4); ctx.fillStyle='#b8e6b8'; ctx.fillRect(-8,-1,16,4); } ctx.restore(); }
+else if (boardSkinId === 'hou') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); ctx.fillStyle='#ffb088'; ctx.beginPath(); ctx.arc(0,2,9,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#c96060'; ctx.beginPath(); ctx.arc(0,2,2,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#5a9c50'; ctx.beginPath(); ctx.ellipse(4,-6,3,2,-0.5,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+else if (boardSkinId === 'ji') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); ctx.fillStyle='#ffd54a'; ctx.beginPath(); ctx.ellipse(0,0,8,10,0,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff8d0'; ctx.beginPath(); ctx.ellipse(-2,-2,2,3,-0.3,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+else if (boardSkinId === 'gou') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); ctx.fillStyle='#e8c9a0'; ctx.beginPath(); ctx.ellipse(0,0,9,7,0,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#a87a48'; ctx.beginPath(); ctx.ellipse(-3,0,2.5,3,0,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(3,0,2.5,3,0,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+else if (boardSkinId === 'zhu') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); ctx.fillStyle='#ffc8d4'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#e07a90'; ctx.beginPath(); ctx.arc(-3,-2,2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(3,-2,2,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-2.2,-2.8,0.8,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(3.8,-2.8,0.8,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+else if (boardSkinId === 'guga') { ctx.save(); ctx.translate(fx,fy); ctx.scale(pulse*1.1,pulse*1.1); if (!drawBoxHelper('guga_food',0,0,GRID*1.35)) { ctx.fillStyle='#ff9a2e'; ctx.beginPath(); ctx.arc(0,0,9,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#5a9c50'; ctx.beginPath(); ctx.ellipse(0,-8.5,2,3.2,0,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
 else {
 // ★ 美术重做：默认食物从「一个圆 + 一个小白点」升级为「带立体感的果实」
 //    ① 主体径向渐变，光源在左上
@@ -1927,7 +2148,7 @@ ctx.fillStyle = sGlow; ctx.beginPath(); ctx.arc(sfx,sfy,GRID*1.75,0,Math.PI*2); 
 ctx.fillStyle = 'rgba(0,0,0,0.4)';
 ctx.beginPath(); ctx.ellipse(sfx, sfy+GRID*0.42, GRID*0.36, GRID*0.12, 0, 0, Math.PI*2); ctx.fill();
 // 外圈倒计时：颜色随剩余时间从绿转黄再转红
-const timerRatio = Math.max(0, specialFoodTimer / SPECIAL_FOOD_DURATION);
+const timerRatio = Math.max(0, specialFoodTimer / getSpecialFoodDuration());
 let rR, rG, rB;
 if (timerRatio > 0.5) { const t = (timerRatio-0.5)/0.5; rR = Math.floor(255*(1-t)); rG = 255; rB = 0; }
 else { const t = timerRatio/0.5; rR = 255; rG = Math.floor(255*t); rB = 0; }
@@ -2061,6 +2282,15 @@ else if (pSkinId === 'long') { ctx.save(); ctx.translate(cx,cy); if (direction.x
 else if (pSkinId === 'she') { if (!drawImageHelper('snake_head',cx,cy,GRID*1.9)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
 else if (pSkinId === 'ma') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper('horse_head',0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
 else if (pSkinId === 'yang') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } if (!drawImageHelper('sheep_head',0,0,GRID*2.0)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
+else if (pSkinId === 'hou') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } const hg = ctx.createRadialGradient(-3,-3,2,0,0,12); hg.addColorStop(0,'#ffd4a8'); hg.addColorStop(1,'#e08a3c'); ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#ffc8a0'; ctx.beginPath(); ctx.ellipse(-9,-3,4,5,0,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(9,-3,4,5,0,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#ffb088'; ctx.beginPath(); ctx.ellipse(0,3,7,6,0,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#4a3020'; ctx.beginPath(); ctx.arc(-4,-2,2.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(4,-2,2.2,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-3.2,-2.8,0.9,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(4.8,-2.8,0.9,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#c96060'; ctx.beginPath(); ctx.arc(0,5,1.6,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+else if (pSkinId === 'ji') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } ctx.fillStyle='#d02020'; ctx.beginPath(); ctx.moveTo(-3,-10); ctx.lineTo(-1,-16); ctx.lineTo(2,-13); ctx.lineTo(5,-17); ctx.lineTo(6,-11); ctx.closePath(); ctx.fill(); const hg = ctx.createRadialGradient(-3,-3,2,0,0,12); hg.addColorStop(0,'#fff0a0'); hg.addColorStop(1,'#e0b030'); ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#ffd54a'; ctx.beginPath(); ctx.moveTo(6,3); ctx.lineTo(13,5); ctx.lineTo(6,7); ctx.closePath(); ctx.fill(); ctx.fillStyle='#4a3020'; ctx.beginPath(); ctx.arc(-3.5,-1,2.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(3.5,-1,2.2,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-2.8,-1.8,0.9,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(4.2,-1.8,0.9,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+else if (pSkinId === 'gou') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } ctx.fillStyle='#b08050'; ctx.beginPath(); ctx.moveTo(-9,-4); ctx.lineTo(-12,-13); ctx.lineTo(-4,-8); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(9,-4); ctx.lineTo(12,-13); ctx.lineTo(4,-8); ctx.closePath(); ctx.fill(); const hg = ctx.createRadialGradient(-3,-3,2,0,0,12); hg.addColorStop(0,'#f0d8b8'); hg.addColorStop(1,'#c09060'); ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#f0d8b8'; ctx.beginPath(); ctx.ellipse(0,4,7,6,0,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#3a2c20'; ctx.beginPath(); ctx.arc(-3.5,-1,2.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(3.5,-1,2.2,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-2.8,-1.8,0.9,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(4.2,-1.8,0.9,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#3a2c20'; ctx.beginPath(); ctx.ellipse(0,5,2.4,1.8,0,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+else if (pSkinId === 'zhu') { ctx.save(); ctx.translate(cx,cy); if (direction.x===1) { ctx.scale(-1,1); } else if (direction.x===-1) {} else if (direction.y===-1) { ctx.rotate(Math.PI/2); } else if (direction.y===1) { ctx.rotate(-Math.PI/2); } ctx.fillStyle='#e07a90'; ctx.beginPath(); ctx.moveTo(-8,-4); ctx.lineTo(-10,-11); ctx.lineTo(-4,-7); ctx.closePath(); ctx.fill(); ctx.beginPath(); ctx.moveTo(8,-4); ctx.lineTo(10,-11); ctx.lineTo(4,-7); ctx.closePath(); ctx.fill(); const hg = ctx.createRadialGradient(-3,-3,2,0,0,12); hg.addColorStop(0,'#ffe0e8'); hg.addColorStop(1,'#e89cb0'); ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#ffb8c8'; ctx.beginPath(); ctx.ellipse(0,4,7,5.5,0,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#c96080'; ctx.beginPath(); ctx.arc(-2.2,4.5,1,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(2.2,4.5,1,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#3a2c20'; ctx.beginPath(); ctx.arc(-3.5,-1,2.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(3.5,-1,2.2,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(-2.8,-1.8,0.9,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(4.2,-1.8,0.9,0,Math.PI*2); ctx.fill(); ctx.restore(); }
+// 咕嘎的头部是一张正面朝前的 Q 版脸，跟「兔/蛇/羊」一样**不跟随方向旋转**——
+// 把它转 90° 会变成一个躺着的头，很怪。要方向感就靠身体和食物的位置去判断。
+// box 取 GRID*1.65：别的皮肤头 dpx 是按 sourceSize 缩放的，实际可见宽度只有
+// 27~34px（虎 27 / 龙 33 / 羊 34），所以这里也用 33px 对齐，不然咕嘎的头会明显偏大。
+else if (pSkinId === 'guga') { if (!drawBoxHelper('guga_head',cx,cy,GRID*1.65)) { const hg = ctx.createRadialGradient(cx-3,cy-3,2,cx,cy,12); hg.addColorStop(0,'#ffd9a8'); hg.addColorStop(1,'#e07a2e'); ctx.fillStyle=hg; ctx.beginPath(); ctx.arc(cx,cy,11,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#3a2c20'; ctx.beginPath(); ctx.arc(cx-3.5,cy-1,2.2,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx+3.5,cy-1,2.2,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(cx-2.8,cy-1.8,0.9,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(cx+4.2,cy-1.8,0.9,0,Math.PI*2); ctx.fill(); } }
 else { const headGrad = ctx.createLinearGradient(x,y,x+GRID,y+GRID); headGrad.addColorStop(0, headColors[0]); headGrad.addColorStop(0.5, headColors[1]); headGrad.addColorStop(1, headColors[2]); 
 // ★ 美术重做：蛇头把「光晕 + 主色块 + 描边 + 高光 + 眼睛」拆开画，层次分明
 // 外层柔光：用 P1/P2 主题色，让蛇头在深色棋盘上自带光源
@@ -2128,6 +2358,20 @@ else if (pSkinId === 'long') { const head = p.body[0]; if (!head) return; const 
 else if (pSkinId === 'she') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h); if (Math.abs(a2h)>Math.PI/2) ctx.scale(1,-1); if (!drawImageHelper('snake_tail',0,0,GRID*1.2)) { ctx.fillStyle='#c5e8b8'; ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
 else if (pSkinId === 'ma') { const head = p.body[0]; if (!head) return; const a2h = Math.atan2(head.y-seg.y, head.x-seg.x); ctx.save(); ctx.translate(cx,cy); ctx.rotate(a2h+Math.PI/2); if (!drawImageHelper('horse_tail',0,0,GRID*1.9)) { ctx.fillStyle='#fdf0e0'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill(); } ctx.restore(); }
 else if (pSkinId === 'yang') { if (!drawImageHelper('sheep_tail',cx,cy,GRID*1.9)) { ctx.fillStyle='#ffffff'; ctx.beginPath(); ctx.arc(cx,cy,12,0,Math.PI*2); ctx.fill(); } }
+else if (pSkinId === 'hou') { if (!drawImageHelper('hou_body',cx,cy,GRID*1.9)) { ctx.fillStyle='#ffb88c'; roundRect(ctx, cx-GRID*0.4, cy-GRID*0.4, GRID*0.8, GRID*0.8, 6); ctx.fill(); } }
+else if (pSkinId === 'ji') { if (!drawImageHelper('ji_body',cx,cy,GRID*1.9)) { ctx.fillStyle='#ffcc33'; roundRect(ctx, cx-GRID*0.4, cy-GRID*0.4, GRID*0.8, GRID*0.8, 6); ctx.fill(); } }
+else if (pSkinId === 'gou') { if (!drawImageHelper('gou_body',cx,cy,GRID*1.9)) { ctx.fillStyle='#d4a870'; roundRect(ctx, cx-GRID*0.4, cy-GRID*0.4, GRID*0.8, GRID*0.8, 6); ctx.fill(); } }
+else if (pSkinId === 'zhu') { if (!drawImageHelper('zhu_body',cx,cy,GRID*1.9)) { ctx.fillStyle='#ff9eb0'; roundRect(ctx, cx-GRID*0.4, cy-GRID*0.4, GRID*0.8, GRID*0.8, 6); ctx.fill(); } }
+else if (pSkinId === 'guga') {
+// 咕嘎：身体每一节从「像素女孩」「企鹅全身」两张图里随机取一张。
+// tex 在首次绘制时定下来就固定住 —— 若每帧都 Math.random()，这一节会疯狂闪烁。
+// 真正"随机出现"的时机交给 update()：每次吃到食物，给刚变长的尾节重掷一次。
+if (seg.tex === undefined) seg.tex = Math.random() < 0.5 ? 0 : 1;
+if (!drawBoxHelper(seg.tex ? 'guga_tail2' : 'guga_tail1', cx, cy, GRID*1.45)) {
+  ctx.fillStyle = seg.tex ? '#5b6270' : '#ffb0c8';
+  roundRect(ctx, cx-GRID*0.4, cy-GRID*0.4, GRID*0.8, GRID*0.8, 6); ctx.fill();
+}
+}
 else {
 const hue = p.bodyHue;
 const t = i/Math.max(p.body.length-1,1);

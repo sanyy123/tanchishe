@@ -167,7 +167,7 @@ const SaveManager = (function () {
     'snakeCatMode', 'snakeObstacleMode', 'snakeCheatSkins', 'snakePlayerName',
     'mazeClearedV1',
     'snakeTitlesV1', 'snakeEquippedTitleV1',
-    'snakeInnAffinity'
+    'snakeInnAffinity', 'snakeInnPendingAffinity', 'snakeInnChatHistory'
   ];
   const SAVE_PREFIXES = ['snakeSeedHigh_', 'mazeHighScoreV1_level'];
 

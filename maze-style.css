@@ -1,4 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
+/* ★ 已移除 Google Fonts 的 @import。
+   原因：fonts.googleapis.com 在国内访问不通，而 CSS 顶部的 @import 会阻塞整个样式表的
+   解析与渲染 —— 每次打开页面都要白等一次连接超时，是手机端"加载很久"的主要元凶之一。
+   现在改用系统字体栈：中文本就由系统字体渲染（Nunito 不含中文字形），
+   只有数字/英文的字形会略有变化，换来的是零字体请求、零渲染阻塞。 */
 
 /* ==========================================================================
    迷宫页设计令牌 —— 与 style.css 保持完全一致，两个页面视觉语言统一。
@@ -29,7 +33,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: 'Nunito', 'Microsoft YaHei', sans-serif; color: var(--t-hi); overflow-x: hidden; overflow-y: auto; background: var(--bg-deep); position: relative; padding: 16px 10px 30px; touch-action: manipulation; overscroll-behavior: none; }
+body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', Roboto, 'Helvetica Neue', Arial, sans-serif; color: var(--t-hi); overflow-x: hidden; overflow-y: auto; background: var(--bg-deep); position: relative; padding: 16px 10px 30px; touch-action: manipulation; overscroll-behavior: none; }
 body::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; background: radial-gradient(ellipse 75% 50% at 22% 38%, rgba(0,245,212,0.09) 0%, transparent 52%), radial-gradient(ellipse 62% 42% at 78% 62%, rgba(155,93,229,0.11) 0%, transparent 54%); }
 body::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: 0.35; background-image: linear-gradient(rgba(148,163,184,0.045) 1px, transparent 1px), linear-gradient(90deg, rgba(148,163,184,0.045) 1px, transparent 1px); background-size: 44px 44px; mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 20%, transparent 78%); -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 45%, #000 20%, transparent 78%); }
 
@@ -60,7 +64,7 @@ h1 { font-size: 2.2rem; font-weight: 800; letter-spacing: 2px; background: linea
 @keyframes shine { to { background-position: 200% center; } }
 .subtitle { font-size: 0.95rem; color: var(--t-mid); margin-top: 4px; letter-spacing: 1px; }
 .top-bar { display: flex; gap: 8px; margin-bottom: 14px; position: relative; z-index: 2; justify-content: center; flex-wrap: wrap; }
-.btn { background: linear-gradient(180deg, rgba(30,38,53,0.9), rgba(21,27,39,0.9)); border: 1px solid var(--line-soft); color: var(--t-hi); font-family: 'Nunito', sans-serif; font-weight: 700; font-size: 0.85rem; padding: 10px 20px; border-radius: var(--r-pill); cursor: pointer; transition: all 0.22s var(--ease-out); box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+.btn { background: linear-gradient(180deg, rgba(30,38,53,0.9), rgba(21,27,39,0.9)); border: 1px solid var(--line-soft); color: var(--t-hi); font-family: inherit; font-weight: 700; font-size: 0.85rem; padding: 10px 20px; border-radius: var(--r-pill); cursor: pointer; transition: all 0.22s var(--ease-out); box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
 .btn:hover { border-color: rgba(0,245,212,0.55); color: var(--c-primary); box-shadow: 0 0 22px rgba(0,245,212,0.22); transform: translateY(-2px); }
 .game-wrapper { position: relative; z-index: 2; width: 100%; max-width: 600px; }
 .game-container { position: relative; border-radius: var(--r-lg); padding: 4px; background: linear-gradient(135deg, #00f5d4, #00bbf9, #9b5de5, #f15bb5); background-size: 300% 300%; animation: borderFlow 7s ease infinite; box-shadow: 0 0 34px rgba(0,245,212,0.22), 0 25px 50px rgba(0,0,0,0.5); }
@@ -88,7 +92,7 @@ canvas { display: block; background: var(--bg-base); width: 100%; height: 100%; 
 #mazeOverlay.hidden { opacity: 0; pointer-events: none; }
 #mazeOverlay h2 { font-size: 2rem; font-weight: 800; margin-bottom: 8px; background: linear-gradient(90deg, #00f5d4, #9b5de5); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center; padding: 0 10px; }
 #mazeOverlay p { color: var(--t-mid); margin-bottom: 22px; font-size: 1rem; text-align: center; padding: 0 16px; }
-#mazeStartBtn { background: linear-gradient(135deg, #00f5d4 0%, #00bbf9 50%, #9b5de5 100%); border: none; color: #0a0e17; font-size: 1.1rem; font-weight: 800; padding: 12px 36px; border-radius: 50px; cursor: pointer; font-family: 'Nunito', sans-serif; letter-spacing: 1px; box-shadow: 0 8px 30px rgba(0,245,212,0.45); }
+#mazeStartBtn { background: linear-gradient(135deg, #00f5d4 0%, #00bbf9 50%, #9b5de5 100%); border: none; color: #0a0e17; font-size: 1.1rem; font-weight: 800; padding: 12px 36px; border-radius: 50px; cursor: pointer; font-family: inherit; letter-spacing: 1px; box-shadow: 0 8px 30px rgba(0,245,212,0.45); }
 #mazeStartBtn:hover { transform: scale(1.05); }
 
 #levelSelectModal { position: fixed; inset: 0; background: rgba(0,0,0,0.8); backdrop-filter: blur(8px); z-index: 50; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
@@ -131,7 +135,7 @@ canvas { display: block; background: var(--bg-base); width: 100%; height: 100%; 
 .result-value.gold { background: linear-gradient(90deg, #ffcc00, #ff9a00); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .result-value.pink { background: linear-gradient(90deg, #f15bb5, #9b5de5); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
 .result-buttons { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
-.result-btn { padding: 12px 22px; border-radius: 50px; border: none; font-family: 'Nunito', sans-serif; font-weight: 800; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+.result-btn { padding: 12px 22px; border-radius: 50px; border: none; font-family: inherit; font-weight: 800; font-size: 0.95rem; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
 .result-btn.secondary { background: rgba(30,41,59,0.85); border: 1px solid rgba(148,163,184,0.3); color: var(--t-hi); }
 .result-btn.secondary:hover { border-color: #00f5d4; color: #00f5d4; }
 .result-btn.primary { background: linear-gradient(135deg, #00f5d4 0%, #00bbf9 50%, #9b5de5 100%); color: #0a0e17; box-shadow: 0 6px 22px rgba(0,245,212,0.4); }
@@ -167,7 +171,7 @@ canvas { display: block; background: var(--bg-base); width: 100%; height: 100%; 
   background: rgba(30,41,59,0.85);
   border: 1px solid rgba(148,163,184,0.4);
   color: var(--t-hi);
-  font-family: 'Nunito', sans-serif;
+  font-family: inherit;
   font-weight: 700;
   font-size: 0.88rem;
   padding: 10px 24px;

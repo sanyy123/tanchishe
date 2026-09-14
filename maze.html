@@ -94,5 +94,14 @@
 <script src="save.js"></script>
 <script src="maze-data.js"></script>
 <script src="maze.js"></script>
+<script>
+// 注册 Service Worker：页面跳转走本地缓存，手机上几乎秒开。
+// 注册失败（隐私模式、非 HTTPS 等）完全不影响迷宫玩法。
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
 </body>
 </html>

@@ -120,6 +120,15 @@
 <script src="data.js"></script>
 <script src="save.js"></script>
 <script src="inn.js"></script>
+<script>
+// 注册 Service Worker：页面跳转走本地缓存，手机上几乎秒开。
+// 注册失败（隐私模式、非 HTTPS 等）完全不影响客栈任何功能。
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  });
+}
+</script>
 
 </body>
 </html>

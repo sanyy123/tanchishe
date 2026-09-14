@@ -1242,8 +1242,18 @@ atlasImg.onerror = () => { console.warn('atlas.png 加载失败，使用矢量�
 atlasImg.src = ATLAS_IMAGE_URL;
 }
 
-Object.values(BGM).forEach(url => { const pre = new Audio(); pre.preload = 'auto'; pre.src = url; });
-audio.src = BGM.menu;
+// ★ 关键性能修复：原来这里会 new 出 4 个 Audio 对象、把全部 BGM 一次性预加载，
+// 合计 6.1MB。首屏和每次页面跳转都在抢这部分带宽，是手机上"加载很久"的头号原因。
+// 现在改成：首屏完全不碰 BGM；等页面空闲后再预取「菜单」这一首（约 490KB）。
+// 既不和首屏抢带宽，又能让玩家第一次点击时几乎立刻听到音乐。
+function prefetchMenuBgm() {
+  try { if (!audio.src) audio.src = BGM.menu; } catch (e) {}
+}
+if (typeof requestIdleCallback === 'function') {
+  requestIdleCallback(prefetchMenuBgm, { timeout: 2500 });
+} else {
+  setTimeout(prefetchMenuBgm, 1200);
+}
 startLoadingScreen();
 
 // ==================== ★ 排行榜前端逻辑 ★ ====================
@@ -1391,11 +1401,37 @@ document.addEventListener('DOMContentLoaded', () => {
 
 const TITLE_TIER_ORDER = ['bronze', 'silver', 'gold', 'diamond', 'legend', 'inn'];
 
+let currentTitleFilter = 'all';
+
 function renderTitles() {
   const listEl = document.getElementById('titleList');
   const countEl = document.getElementById('titleCount');
   const currentEl = document.getElementById('titleCurrent');
+  const filterEl = document.getElementById('titleFilter');
   if (!listEl) return;
+
+  // ★ 筛选栏：只有元素存在时才渲染，避免 HTML 没加就报错
+  if (filterEl) {
+    const tiers = [
+      { id: 'all',     name: '全部' },
+      { id: 'bronze',  name: '青铜' },
+      { id: 'silver',  name: '白银' },
+      { id: 'gold',    name: '黄金' },
+      { id: 'diamond', name: '钻石' },
+      { id: 'legend',  name: '王者' },
+      { id: 'inn',     name: '客栈' }
+    ];
+    filterEl.innerHTML = tiers.map(t =>
+      '<button class="title-filter-btn' + (currentTitleFilter === t.id ? ' active' : '') +
+      '" data-tier="' + t.id + '">' + t.name + '</button>'
+    ).join('');
+    filterEl.querySelectorAll('.title-filter-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentTitleFilter = btn.dataset.tier;
+        renderTitles();
+      });
+    });
+  }
 
   if (countEl) countEl.textContent = unlockedTitles.length + '/' + TITLES.length;
 
@@ -1410,15 +1446,18 @@ function renderTitles() {
     }
   }
 
-  // 按难度排序
-  const sorted = [...TITLES].sort((a, b) =>
+  // ★ 先按筛选过滤，再按难度排序
+  const filtered = currentTitleFilter === 'all'
+    ? [...TITLES]
+    : TITLES.filter(t => t.tier === currentTitleFilter);
+
+  const sorted = filtered.sort((a, b) =>
     TITLE_TIER_ORDER.indexOf(a.tier) - TITLE_TIER_ORDER.indexOf(b.tier)
   );
 
   listEl.innerHTML = '';
   let lastTier = '';
   sorted.forEach(t => {
-    // 每个难度段加一个小标题
     if (t.tier !== lastTier) {
       lastTier = t.tier;
       const sectionTitle = document.createElement('div');
